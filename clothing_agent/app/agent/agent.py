@@ -547,11 +547,58 @@ class FitzyAgent:
                 relevant[tool_key] = value.model_dump(mode="json") if hasattr(value, "model_dump") else value
                 completed_tools.append(tool_key)
 
+        product_cards = []
+        if state.displayed_products and ToolName.GET_PRODUCTS.value in state.last_tool_results:
+            search_res = state.last_tool_results[ToolName.GET_PRODUCTS.value]
+            if hasattr(search_res, "products") and search_res.products:
+                seen_ids = set()
+                for ref in state.displayed_products:
+                    if ref.product_id in seen_ids:
+                        continue
+                    seen_ids.add(ref.product_id)
+                    p_match = next((p for p in search_res.products if p.product_id == ref.product_id), None)
+                    if p_match:
+                        product_cards.append({
+                            "product": {
+                                "product_id": p_match.product_id,
+                                "article_code": p_match.article_code,
+                                "product_name": p_match.product_name,
+                                "description": getattr(p_match, "description", None),
+                                "category": getattr(p_match, "category", ""),
+                                "subcategory": None,
+                                "product_type": getattr(p_match, "product_type", ""),
+                                "gender": getattr(p_match, "gender", "MEN"),
+                                "brand": getattr(p_match, "brand", "Northstar"),
+                                "material": getattr(p_match, "material", None),
+                                "fit": getattr(p_match, "fit", None),
+                                "season": getattr(p_match, "season", None),
+                                "occasion": getattr(p_match, "occasion", None),
+                                "base_price": float(getattr(p_match, "price", 0)),
+                                "final_price": float(getattr(p_match, "price", 0)),
+                                "discount_amount": 0,
+                                "applied_offer": None,
+                                "images": [p_match.image_url] if getattr(p_match, "image_url", None) else [],
+                                "variants": [{
+                                    "variant_id": p_match.variant_id,
+                                    "sku": p_match.sku,
+                                    "color": getattr(p_match, "color", ""),
+                                    "size": getattr(p_match, "size", ""),
+                                    "price": float(getattr(p_match, "price", 0)),
+                                    "final_price": float(getattr(p_match, "price", 0)),
+                                    "discount_amount": 0,
+                                    "applied_offer": None,
+                                    "is_available": getattr(p_match, "available_quantity", 0) > 0,
+                                    "branch_availability": []
+                                }]
+                            }
+                        })
+
         return {
             "language": state.language.value if state.language else None,
             "preferences": state.preferences.model_dump(mode="json"),
             "current_search": state.current_search.model_dump(mode="json"),
             "displayed_products": [item.model_dump(mode="json") for item in state.displayed_products],
+            "product_cards": product_cards,
             "selected_product_id": state.selected_product_id,
             "delivery": state.delivery.model_dump(mode="json"),
             "cart": state.cart.model_dump(mode="json"),

@@ -36,6 +36,7 @@ Rules:
 - Multiple intents may exist in one message.
 - Extract only values actually stated or unambiguously referenced.
 - Never invent required parameters.
+- General catalog queries like "what products do you have?", "tumhare paas kaun kaun si products hain", or "مجھے بتاؤ تمہارے پاس کون کون سی پروڈکٹس ہیں" MUST be classified as 'store_context'. They are NOT 'product_search' or 'get_products'.
 - A phrase such as 'the first one' is a product reference, not a guessed ID.
 - Branch is optional for ordinary online shopping. It becomes relevant when
   the customer explicitly asks branch-specific availability or branch details.
