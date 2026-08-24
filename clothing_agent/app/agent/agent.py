@@ -131,9 +131,9 @@ class FitzyAgent:
         )
 
         self._resolve_known_parameters(state)
-        await self._execute_until_waiting(state)
+        await self._execute_until_waiting(state, user_message=message)
 
-        runtime_context = self._build_runtime_context(state)
+        runtime_context = self._build_runtime_context(state, user_message=message)
         reply = await self._responses.generate(
             language=state.language or LanguageMode.ENGLISH,
             user_message=message,
@@ -505,7 +505,7 @@ class FitzyAgent:
         first = available[0]
         return first if all(item.variant_id == first.variant_id and item.size == first.size and item.color == first.color for item in available) else first
 
-    async def _execute_until_waiting(self, state: ConversationState) -> None:
+    async def _execute_until_waiting(self, state: ConversationState, user_message: str = "") -> None:
         """Execute ready actions, refresh deterministic state, and continue dependencies."""
 
         for _ in range(10):
@@ -521,7 +521,7 @@ class FitzyAgent:
                 action = state.action_plan.get(action_id)
                 if action:
                     logger.info("action.completed action=%s tool=%s", action_id, action.tool_name.value)
-                    self._apply_completed_action(state, action)
+                    self._apply_completed_action(state, action, user_message=user_message)
 
             if result.waiting_action_id:
                 logger.info("action.waiting action=%s missing=%s", result.waiting_action_id, result.missing_parameters)
@@ -535,7 +535,42 @@ class FitzyAgent:
             if not state.action_plan.ready_actions():
                 return
 
-    def _apply_completed_action(self, state: ConversationState, action: Any) -> None:
+    @staticmethod
+    def _is_broad_category_search(search: SearchContext, user_message: str = "") -> bool:
+        """Deterministic Business Rule: Return True if search is a broad category/vague query without specific subcategory filters."""
+
+        msg_lower = user_message.lower().strip()
+        if "show" in msg_lower or "display" in msg_lower:
+            return False
+
+        specific_filters = (
+            search.colors
+            or search.product_types
+            or search.occasions
+            or search.minimum_price
+            or search.maximum_price
+        )
+        if specific_filters:
+            return False
+
+        broad_terms = {
+            "shirt", "shirts", "t-shirt", "t-shirts", "tshirt", "tshirts",
+            "pant", "pants", "trouser", "trousers", "outerwear", "traditional",
+            "casual", "formal", "party", "something", "clothes", "clothing", "wear",
+            "items", "stuff", "options", "menswear", "collection", "categories", "catalog"
+        }
+
+        cats = [c.lower().strip() for c in (search.categories or [])]
+        if any(c in broad_terms for c in cats):
+            return True
+
+        query_str = str(search.query_text or "").lower().strip()
+        if not query_str or query_str in broad_terms or query_str.startswith("i want "):
+            return True
+
+        return False
+
+    def _apply_completed_action(self, state: ConversationState, action: Any, user_message: str = "") -> None:
         """Apply normalized tool results to state without duplicating backend logic."""
 
         result = state.last_tool_results.get(action.tool_name.value)
@@ -543,19 +578,7 @@ class FitzyAgent:
             return
 
         if action.tool_name == ToolName.GET_PRODUCTS and isinstance(result, ProductSearchResponse):
-            search = state.current_search
-            specific_filters = (
-                search.colors
-                or search.product_types
-                or search.occasions
-                or search.minimum_price
-                or search.maximum_price
-            )
-            vague_query_words = {"casual", "formal", "party", "something", "clothes", "wear", "items", "stuff", "options", "menswear"}
-            query_str = str(search.query_text or "").lower().strip()
-            is_vague = (query_str in vague_query_words or (query_str.startswith("i want ") and "show" not in query_str)) and not specific_filters
-
-            if is_vague:
+            if self._is_broad_category_search(state.current_search, user_message=user_message):
                 state.displayed_products = []
                 state.remember_displayed_products([])
             else:
@@ -616,7 +639,7 @@ class FitzyAgent:
             "explicit_confirmation": state.last_tool_results.get("explicit_confirmation"),
         }
 
-    def _build_runtime_context(self, state: ConversationState) -> dict[str, Any]:
+    def _build_runtime_context(self, state: ConversationState, user_message: str = "") -> dict[str, Any]:
         """Build compact response context focused on the current execution cycle."""
 
         relevant: dict[str, Any] = {}
@@ -633,6 +656,9 @@ class FitzyAgent:
                 completed_tools.append(tool_key)
 
         product_cards = []
+        if self._is_broad_category_search(state.current_search, user_message=user_message):
+            state.displayed_products = []
+
         if state.displayed_products and ToolName.GET_PRODUCTS.value in state.last_tool_results:
             search_res = state.last_tool_results[ToolName.GET_PRODUCTS.value]
             if hasattr(search_res, "products") and search_res.products:
