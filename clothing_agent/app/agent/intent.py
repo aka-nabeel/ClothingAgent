@@ -156,17 +156,15 @@ def classify_language(message: str, current_language: LanguageMode | None = None
     roman_urdu_words = {
         "mujhe", "chahiye", "kuch", "shadi", "karo", "dikhao", "apna", "hai",
         "hain", "kya", "batao", "kaunsa", "kitne", "pehan", "kapray", "bhej",
-        "do", "kardo", "aacha", "bhi", "wala", "wali", "wale", "karni", "hote"
+        "do", "kardo", "aacha", "bhi", "wala", "wali", "wale", "karni", "hote",
+        "sub", "sab", "yeh", "woh", "kis", "kisi", "mere", "meri", "humara", "humari"
     }
     tokens = set(re.findall(r"\b\w+\b", message.lower()))
     if tokens & roman_urdu_words:
         return LanguageMode.ROMAN_URDU
 
-    # 4. Check for explicit English indicator or retain current established language if set
-    if current_language is not None:
-        english_indicators = {"show", "need", "what", "where", "tell", "add", "place", "order", "total", "cart", "yes", "please", "my", "name", "phone"}
-        if tokens & english_indicators and not (tokens & roman_urdu_words):
-            return LanguageMode.ENGLISH
-        return current_language
+    # 4. English check: If Latin letters present and no Roman Urdu words, classify as English
+    if any(c.isalpha() for c in message):
+        return LanguageMode.ENGLISH
 
-    return LanguageMode.ENGLISH
+    return current_language or LanguageMode.ENGLISH

@@ -18,6 +18,7 @@ class ChatRequest(BaseModel):
 
     session_id: str = Field(min_length=1)
     message: str = Field(min_length=1)
+    language: Optional[str] = None
 
 
 class ChatResponse(BaseModel):
@@ -34,6 +35,7 @@ class SessionResetRequest(BaseModel):
 
     session_id: str = Field(min_length=1)
     keep_cart: bool = True
+    language: Optional[str] = None
 
 
 class SessionResetResponse(BaseModel):
@@ -59,8 +61,14 @@ def get_agent() -> FitzyAgent:
 async def chat(request: ChatRequest, agent: FitzyAgent = Depends(get_agent)) -> ChatResponse:
     """Process one customer message through the Fitzy runtime."""
 
-    reply_text = await agent.process_message(session_id=request.session_id, message=request.message)
+    reply_text = await agent.process_message(
+        session_id=request.session_id,
+        message=request.message,
+        language=request.language,
+    )
     state = agent.get_state(request.session_id)
+    if request.language:
+        state.set_language(request.language)
     runtime_context = agent._build_runtime_context(state)
 
     return ChatResponse(
@@ -85,6 +93,8 @@ async def reset_session_endpoint(
     state.displayed_products = []
     state.selected_product_id = None
     state.current_search.clear()
+    if request.language:
+        state.set_language(request.language)
     if not request.keep_cart:
         state.cart.cart_id = None
         state.cart.item_count = 0

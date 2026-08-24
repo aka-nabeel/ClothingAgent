@@ -209,10 +209,16 @@ class ConversationState(BaseModel):
         normalized = language.strip().lower()
         aliases = {
             "english": LanguageMode.ENGLISH,
+            "en": LanguageMode.ENGLISH,
+            "us": LanguageMode.ENGLISH,
+            "uk": LanguageMode.ENGLISH,
             "urdu": LanguageMode.URDU_SCRIPT,
+            "ur": LanguageMode.URDU_SCRIPT,
+            "pk": LanguageMode.URDU_SCRIPT,
             "urdu_script": LanguageMode.URDU_SCRIPT,
             "roman_urdu": LanguageMode.ROMAN_URDU,
             "roman urdu": LanguageMode.ROMAN_URDU,
+            "roman": LanguageMode.ROMAN_URDU,
         }
         try:
             self.language = aliases[normalized]

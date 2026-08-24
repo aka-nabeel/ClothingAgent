@@ -17,6 +17,7 @@ from .state import (
     DisplayedProductReference,
     LanguageMode,
 )
+from ..core.config import AgentConfig, get_config
 from ..integration.client import CommerceToolAdapter
 from ..integration.schemas import ProductSearchResponse
 from ..llm.client import LLMClient
@@ -28,9 +29,10 @@ logger = logging.getLogger("fitzy.agent")
 class FitzyAgent:
     """Coordinate language understanding, planning, requirements and tool execution."""
 
-    def __init__(self, *, llm: LLMClient, tools: CommerceToolAdapter) -> None:
+    def __init__(self, *, llm: LLMClient, tools: CommerceToolAdapter, config: AgentConfig | None = None) -> None:
         self._llm = llm
         self._tools = tools
+        self._config = config or get_config()
         self._planner = ActionPlanner()
         self._execution = ActionExecutionCoordinator()
         self._responses = ResponseGuard(llm)
@@ -43,15 +45,27 @@ class FitzyAgent:
             self._states[session_id] = ConversationState()
         return self._states[session_id]
 
-    async def process_message(self, *, session_id: str, message: str) -> str:
+    async def process_message(
+        self,
+        *,
+        session_id: str,
+        message: str,
+        language: str | None = None,
+    ) -> str:
         """Process one customer message through the full V1 runtime pipeline."""
 
         state = self.get_state(session_id)
-        logger.info("[CHAT INPUT] session=%s | message=%r", session_id, message)
+        logger.info("[CHAT INPUT] session=%s | message=%r | explicit_language=%r", session_id, message, language)
 
         extraction = await self._extract_intent(message)
-        det_language = classify_language(message, state.language)
-        state.set_language(det_language)
+        if language:
+            state.set_language(language)
+        elif self._config.auto_detect_language_per_message:
+            det_language = classify_language(message, state.language)
+            state.set_language(det_language)
+        elif not state.language:
+            det_language = classify_language(message, None)
+            state.set_language(det_language)
         
         extracted_intents_summary = [
             f"{i.intent_type.value}(params={i.parameters}, confirmation={i.explicit_confirmation})"

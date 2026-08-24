@@ -43,6 +43,7 @@ class AgentConfig(BaseSettings):
     recent_message_limit: int = Field(default=12, ge=2, le=30)
     displayed_product_limit: int = Field(default=3, ge=1, le=6)
     maximum_clarification_questions: int = Field(default=2, ge=0, le=3)
+    auto_detect_language_per_message: bool = Field(default=True)
 
     @field_validator("llm_api_key", mode="before")
     @classmethod

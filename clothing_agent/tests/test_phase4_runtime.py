@@ -130,3 +130,18 @@ async def test_urdu_response_rejects_devanagari() -> None:
     agent = FitzyAgent(llm=UnsafeLLM(), tools=FakeAdapter())  # type: ignore[arg-type]
     result = await agent.process_message(session_id="s3", message="mujhe help chahiye")
     assert result == "Bilkul, main madad karta hoon."
+
+
+@pytest.mark.asyncio
+async def test_explicit_language_override_and_config_toggle() -> None:
+    extraction = IntentExtraction(
+        language=LanguageMode.URDU_SCRIPT,
+        intents=[IntentRequest(intent_id="1", intent_type=IntentType.GENERAL_CONVERSATION)],
+    )
+    llm = FakeLLMClient(extraction, "Hello, how can I help you?")
+    adapter = FakeAdapter()
+    agent = FitzyAgent(llm=llm, tools=adapter)  # type: ignore[arg-type]
+
+    await agent.process_message(session_id="s4", message="who are you", language="english")
+    state = agent.get_state("s4")
+    assert state.language == LanguageMode.ENGLISH
