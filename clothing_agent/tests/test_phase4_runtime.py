@@ -194,3 +194,19 @@ async def test_mid_chat_language_switching_sequence() -> None:
     # Turn 4: Roman Urdu message -> switches to ROMAN_URDU
     await agent.process_message(session_id="s6", message="mujhe size L chahiye")
     assert agent.get_state("s6").language == LanguageMode.ROMAN_URDU
+
+
+@pytest.mark.asyncio
+async def test_vague_query_business_rule_suppresses_cards() -> None:
+    extraction = IntentExtraction(
+        language=LanguageMode.ENGLISH,
+        intents=[IntentRequest(intent_id="1", intent_type=IntentType.PRODUCT_SEARCH, parameters={"query_text": "casual"})],
+    )
+    llm = FakeLLMClient(extraction, "Could you specify what casual wear you want?")
+    agent = FitzyAgent(llm=llm, tools=FakeAdapter())  # type: ignore[arg-type]
+
+    await agent.process_message(session_id="s7", message="I want casual")
+    state = agent.get_state("s7")
+    assert state.displayed_products == []
+    context = agent._build_runtime_context(state)
+    assert context["product_cards"] == []

@@ -42,16 +42,15 @@ class ResponseGuard:
             # Currency post-processing: replace accidental $ with PKR
             response = re.sub(r"\$(\s*\d+)", r"PKR \1", response)
 
-            # Language leakage check for URDU_SCRIPT mode:
-            is_urdu_leak = (
-                language == LanguageMode.URDU_SCRIPT
-                and not re.search(r"[\u0600-\u06FF]", response)
-            )
+            # Business Rule 1: Language leakage check for URDU_SCRIPT mode
+            has_urdu_chars = bool(re.search(r"[\u0600-\u06FF]", response))
+            has_english_prose = bool(re.search(r"\b(sure|here|would|you|like|the|in|is|are|we|have|stock|available|option|products|selection)\b", response.lower()))
+            is_urdu_leak = language == LanguageMode.URDU_SCRIPT and (not has_urdu_chars or has_english_prose)
 
             if DEVANAGARI_RE.search(response) or is_urdu_leak:
                 retry_prompt = (
                     f"{prompt}\n\nHARD SAFETY RULE: The customer's session language is strictly set to URDU SCRIPT (اردو). "
-                    f"Your previous response was NOT in Urdu script. You MUST write your entire response 100% in clear, polite Urdu script (اردو) right now!"
+                    f"Your previous response contained English or non-Urdu script. You MUST write your entire response 100% in clear, polite Urdu script (اردو) right now!"
                 )
                 response = await self._llm.generate_text(
                     system_prompt=retry_prompt,
@@ -65,7 +64,11 @@ class ResponseGuard:
             if DEVANAGARI_RE.search(response):
                 raise LLMResponseError("Unsafe Devanagari/Hindi output detected after regeneration")
 
-            if language == LanguageMode.URDU_SCRIPT and not re.search(r"[\u0600-\u06FF]", response):
+            # Final Business Rule Enforcer: Force deterministic fallback if Urdu Script mode is violated
+            if language == LanguageMode.URDU_SCRIPT and (not re.search(r"[\u0600-\u06FF]", response) or re.search(r"\b(sure|here|would|you|like|the|in|is|are|we|have|stock|available|selection)\b", response.lower())):
+                return self._fallback_response(language, user_message, runtime_context)
+
+            if language == LanguageMode.ENGLISH and re.search(r"[\u0600-\u06FF]", response):
                 return self._fallback_response(language, user_message, runtime_context)
 
             sanitized = self._sanitize_metadata_if_not_requested(user_message, response.strip())

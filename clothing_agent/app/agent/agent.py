@@ -514,23 +514,39 @@ class FitzyAgent:
             return
 
         if action.tool_name == ToolName.GET_PRODUCTS and isinstance(result, ProductSearchResponse):
-            references: list[DisplayedProductReference] = []
-            seen_products: set[int] = set()
-            index = 1
-            for option in result.products:
-                if option.product_id in seen_products:
-                    continue
-                seen_products.add(option.product_id)
-                references.append(
-                    DisplayedProductReference(
-                        index=index,
-                        product_id=option.product_id,
-                        article_code=option.article_code,
-                        product_name=option.product_name,
+            search = state.current_search
+            specific_filters = (
+                search.colors
+                or search.product_types
+                or search.occasions
+                or search.minimum_price
+                or search.maximum_price
+            )
+            vague_query_words = {"casual", "formal", "party", "something", "clothes", "wear", "items", "stuff", "options", "menswear"}
+            query_str = str(search.query_text or "").lower().strip()
+            is_vague = (query_str in vague_query_words or (query_str.startswith("i want ") and "show" not in query_str)) and not specific_filters
+
+            if is_vague:
+                state.displayed_products = []
+                state.remember_displayed_products([])
+            else:
+                references: list[DisplayedProductReference] = []
+                seen_products: set[int] = set()
+                index = 1
+                for option in result.products:
+                    if option.product_id in seen_products:
+                        continue
+                    seen_products.add(option.product_id)
+                    references.append(
+                        DisplayedProductReference(
+                            index=index,
+                            product_id=option.product_id,
+                            article_code=option.article_code,
+                            product_name=option.product_name,
+                        )
                     )
-                )
-                index += 1
-            state.remember_displayed_products(references)
+                    index += 1
+                state.remember_displayed_products(references)
         elif action.tool_name in {ToolName.ADD_TO_CART, ToolName.UPDATE_CART, ToolName.REMOVE_FROM_CART, ToolName.CLEAR_CART}:
             state.last_tool_results["explicit_confirmation"] = None
             state.last_tool_results.pop(ToolName.PREVIEW_CHECKOUT.value, None)
