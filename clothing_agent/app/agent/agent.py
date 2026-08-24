@@ -580,7 +580,7 @@ class FitzyAgent:
                                 "images": [p_match.image_url] if getattr(p_match, "image_url", None) else [],
                                 "variants": [{
                                     "variant_id": p_match.variant_id,
-                                    "sku": p_match.sku,
+                                    "sku": getattr(p_match, "sku", p_match.article_code),
                                     "color": getattr(p_match, "color", ""),
                                     "size": getattr(p_match, "size", ""),
                                     "price": float(getattr(p_match, "price", 0)),
