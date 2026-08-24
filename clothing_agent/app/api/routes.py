@@ -89,15 +89,11 @@ async def reset_session_endpoint(
 ) -> SessionResetResponse:
     """Flush session state while leaving cart items intact if keep_cart is True."""
 
-    state = agent.get_state(request.session_id)
-    state.displayed_products = []
-    state.selected_product_id = None
-    state.current_search.clear()
-    if request.language:
-        state.set_language(request.language)
-    if not request.keep_cart:
-        state.cart.cart_id = None
-        state.cart.item_count = 0
+    state = agent.reset_state(
+        request.session_id,
+        keep_cart=request.keep_cart,
+        language=request.language,
+    )
     runtime_context = agent._build_runtime_context(state)
     return SessionResetResponse(session_id=request.session_id, state=runtime_context)
 
@@ -110,11 +106,6 @@ async def delete_session_endpoint(
 ) -> SessionResetResponse:
     """Delete session state and clear cart when explicitly requested."""
 
-    state = agent.get_state(session_id)
-    state.displayed_products = []
-    state.selected_product_id = None
-    state.current_search.clear()
-    state.cart.cart_id = None
-    state.cart.item_count = 0
+    state = agent.reset_state(session_id, keep_cart=False)
     runtime_context = agent._build_runtime_context(state)
     return SessionResetResponse(session_id=session_id, state=runtime_context)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from decimal import Decimal
 from typing import Any
+from uuid import UUID, uuid5, NAMESPACE_DNS
 
 from .contracts import ToolName
 from .execution import ActionExecutionCoordinator
@@ -36,14 +37,42 @@ class FitzyAgent:
         self._planner = ActionPlanner()
         self._execution = ActionExecutionCoordinator()
         self._responses = ResponseGuard(llm)
-        self._states: dict[str, ConversationState] = {}
+        self._sessions: dict[str, ConversationState] = {}
 
-    def get_state(self, session_id: str) -> ConversationState:
-        """Return an existing conversation state or create a fresh one."""
+    def _to_uuid(self, session_id: str | UUID) -> UUID:
+        if isinstance(session_id, UUID):
+            return session_id
+        try:
+            return UUID(str(session_id))
+        except ValueError:
+            return uuid5(NAMESPACE_DNS, str(session_id))
 
-        if session_id not in self._states:
-            self._states[session_id] = ConversationState()
-        return self._states[session_id]
+    def get_state(self, session_id: str | UUID) -> ConversationState:
+        """Fetch or initialize the long-lived conversation state for a session."""
+
+        key = str(session_id)
+        if key not in self._sessions:
+            self._sessions[key] = ConversationState(session_id=self._to_uuid(session_id))
+        return self._sessions[key]
+
+    def reset_state(
+        self,
+        session_id: str | UUID,
+        *,
+        keep_cart: bool = False,
+        language: str | None = None,
+    ) -> ConversationState:
+        """Completely clear all conversation state, preferences, tool caches, and search filters."""
+
+        key = str(session_id)
+        state = ConversationState(session_id=self._to_uuid(session_id))
+        if language:
+            state.set_language(language)
+        if keep_cart and key in self._sessions:
+            existing_cart = self._sessions[key].cart
+            state.cart = existing_cart
+        self._sessions[key] = state
+        return state
 
     async def process_message(
         self,

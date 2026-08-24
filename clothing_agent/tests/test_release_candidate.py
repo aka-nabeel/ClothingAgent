@@ -78,12 +78,20 @@ async def test_api_contract_matrix_compatibility():
         assert res.status_code == 200
         data = res.json()
         assert "products" in data and len(data["products"]) > 0
-        product = data["products"][0]
+        product = None
+        in_stock_variant = None
+        for p in data["products"]:
+            for v in p.get("variants", []):
+                if v.get("available_quantity", 0) > 0:
+                    product = p
+                    in_stock_variant = v
+                    break
+            if product:
+                break
+        if not product:
+            product = data["products"][0]
+            in_stock_variant = product["variants"][0]
         product_id = product["product_id"]
-        in_stock_variant = next(
-            (v for v in product.get("variants", []) if v.get("available_quantity", 0) > 0),
-            product["variants"][0]
-        )
         variant_id = in_stock_variant["variant_id"]
         if in_stock_variant.get("branch_id"):
             branch_id = in_stock_variant["branch_id"]
@@ -99,12 +107,23 @@ async def test_api_contract_matrix_compatibility():
         assert res.status_code == 200
 
         # 6. Inventory Availability & Branch selection
-        for b in branches:
-            bid = b["branch_id"]
-            res = await client.get(f"/api/v1/inventory/availability?variant_id={variant_id}&branch_id={bid}")
-            assert res.status_code == 200
-            if res.json().get("available_quantity", 0) > 0:
-                branch_id = bid
+        found_in_stock = False
+        for p in data["products"]:
+            for v in p.get("variants", []):
+                v_id = v["variant_id"]
+                for b in branches:
+                    bid = b["branch_id"]
+                    res = await client.get(f"/api/v1/inventory/availability?variant_id={v_id}&branch_id={bid}")
+                    assert res.status_code == 200
+                    if res.json().get("available_quantity", 0) > 0:
+                        product_id = p["product_id"]
+                        variant_id = v_id
+                        branch_id = bid
+                        found_in_stock = True
+                        break
+                if found_in_stock:
+                    break
+            if found_in_stock:
                 break
 
         # 7. Promotions
@@ -183,26 +202,34 @@ async def test_api_contract_matrix_compatibility():
 @pytest.mark.asyncio
 async def test_multilingual_live_llm_responses(real_llm):
     """Test real LLM in English, Roman Urdu, and Urdu Script without Hindi/Devanagari outputs."""
+    from clothing_agent.app.agent.response import ResponseGuard
+    from clothing_agent.app.agent.state import LanguageMode
+
+    guard = ResponseGuard(real_llm)
+
     # English
-    en_reply = await real_llm.generate_text(
-        system_prompt="You are Fitzy, a friendly sales assistant for Northstar Menswear. Answer concisely in English.",
-        user_message="I need something for a wedding."
+    en_reply = await guard.generate(
+        language=LanguageMode.ENGLISH,
+        user_message="I need something for a wedding.",
+        runtime_context={},
     )
     assert len(en_reply) > 0
     assert not any('\u0900' <= char <= '\u097F' for char in en_reply), "Contained Devanagari script!"
 
     # Roman Urdu
-    ru_reply = await real_llm.generate_text(
-        system_prompt="You are Fitzy. Respond in Roman Urdu (Pakistani Urdu written in Latin script). Do NOT use Devanagari/Hindi.",
-        user_message="mujhe shadi ke liye kuch acha sa chahiye"
+    ru_reply = await guard.generate(
+        language=LanguageMode.ROMAN_URDU,
+        user_message="mujhe shadi ke liye kuch acha sa chahiye",
+        runtime_context={},
     )
     assert len(ru_reply) > 0
     assert not any('\u0900' <= char <= '\u097F' for char in ru_reply), "Contained Devanagari script!"
 
     # Urdu Script
-    ur_reply = await real_llm.generate_text(
-        system_prompt="You are Fitzy. Respond in authentic Urdu script. Do NOT use Hindi/Devanagari.",
-        user_message="مجھے شادی کے لیے کچھ اچھا سا چاہیے"
+    ur_reply = await guard.generate(
+        language=LanguageMode.URDU_SCRIPT,
+        user_message="مجھے شادی کے لیے کچھ اچھا سا چاہیے",
+        runtime_context={},
     )
     assert len(ur_reply) > 0
     assert not any('\u0900' <= char <= '\u097F' for char in ur_reply), "Contained Devanagari script!"
