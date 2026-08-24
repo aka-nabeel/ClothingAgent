@@ -168,3 +168,29 @@ async def test_english_input_with_urdu_session_forces_urdu_response() -> None:
 
     reply = await agent.process_message(session_id="s5", message="i want to buy some shirts")
     assert "نارتھ اسٹار" in reply
+
+
+@pytest.mark.asyncio
+async def test_mid_chat_language_switching_sequence() -> None:
+    extraction = IntentExtraction(
+        language=LanguageMode.ENGLISH,
+        intents=[IntentRequest(intent_id="1", intent_type=IntentType.GENERAL_CONVERSATION)],
+    )
+    llm = FakeLLMClient(extraction, "Test Response")
+    agent = FitzyAgent(llm=llm, tools=FakeAdapter())  # type: ignore[arg-type]
+
+    # Turn 1: Urdu message -> switches to URDU_SCRIPT
+    await agent.process_message(session_id="s6", message="مجھے شرٹس دکھاؤ")
+    assert agent.get_state("s6").language == LanguageMode.URDU_SCRIPT
+
+    # Turn 2: English message while session is URDU_SCRIPT -> retains URDU_SCRIPT on priority!
+    await agent.process_message(session_id="s6", message="show me shirts")
+    assert agent.get_state("s6").language == LanguageMode.URDU_SCRIPT
+
+    # Turn 3: Explicit English passed from UI -> switches to ENGLISH
+    await agent.process_message(session_id="s6", message="show me shirts", language="english")
+    assert agent.get_state("s6").language == LanguageMode.ENGLISH
+
+    # Turn 4: Roman Urdu message -> switches to ROMAN_URDU
+    await agent.process_message(session_id="s6", message="mujhe size L chahiye")
+    assert agent.get_state("s6").language == LanguageMode.ROMAN_URDU

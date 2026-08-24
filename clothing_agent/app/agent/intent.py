@@ -144,15 +144,16 @@ def intent_to_tool(intent_type: IntentType) -> ToolName | None:
 def classify_language(message: str, current_language: LanguageMode | None = None) -> LanguageMode:
     """Deterministically classify input language into English, Roman Urdu, Urdu script, or fallback from unsupported Hindi."""
     import re
+
     # 1. Devanagari / Hindi check: Never adopt Devanagari. Retain established language or default to English.
     if re.search(r"[\u0900-\u097F]", message):
         return current_language or LanguageMode.ENGLISH
 
-    # 2. Urdu Script check: Contains Arabic/Urdu unicode range
+    # 2. Explicit Urdu Script check: Contains Arabic/Urdu unicode range
     if re.search(r"[\u0600-\u06FF]", message):
         return LanguageMode.URDU_SCRIPT
 
-    # 3. Roman Urdu check: Check for distinctive Roman Urdu tokens
+    # 3. Explicit Roman Urdu check: Check for distinctive Roman Urdu tokens
     roman_urdu_words = {
         "mujhe", "chahiye", "kuch", "shadi", "karo", "dikhao", "apna", "hai",
         "hain", "kya", "batao", "kaunsa", "kitne", "pehan", "kapray", "bhej",
@@ -163,8 +164,10 @@ def classify_language(message: str, current_language: LanguageMode | None = None
     if tokens & roman_urdu_words:
         return LanguageMode.ROMAN_URDU
 
-    # 4. English check: If Latin letters present and no Roman Urdu words, classify as English
-    if any(c.isalpha() for c in message):
-        return LanguageMode.ENGLISH
+    # 4. If a session language is already established (e.g. URDU_SCRIPT or ROMAN_URDU),
+    # retain established session language on priority instead of drifting to English.
+    if current_language is not None:
+        return current_language
 
-    return current_language or LanguageMode.ENGLISH
+    # 5. Default fallback for initial turn without established language
+    return LanguageMode.ENGLISH

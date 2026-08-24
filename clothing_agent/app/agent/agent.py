@@ -57,16 +57,15 @@ class FitzyAgent:
         state = self.get_state(session_id)
         logger.info("[CHAT INPUT] session=%s | message=%r | explicit_language=%r", session_id, message, language)
 
-        # Language Priority Rule:
-        # 1. If explicit `language` parameter is passed in API request, update session state.
+        # Language Resolution Rule:
+        # 1. If explicit `language` parameter is passed in API request (e.g. from UI header dropdown),
+        #    update session state and use it on highest priority.
         if language:
             state.set_language(language)
-        # 2. If session language is uninitialized, detect once to set default session language.
-        elif not state.language:
-            det_language = classify_language(message, None)
+        else:
+            # 2. Otherwise, detect language from message text to support dynamic mid-chat language switching.
+            det_language = classify_language(message, state.language)
             state.set_language(det_language)
-        # 3. If session language is already set (e.g. from UI header or session setup),
-        # state.language remains unchanged as the authoritative priority session language.
         
         extraction = await self._extract_intent(message)
 
