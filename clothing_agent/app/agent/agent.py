@@ -138,6 +138,14 @@ class FitzyAgent:
             self._apply_delivery_fields(params, state)
 
             if intent.intent_type in {
+                IntentType.STORE_CONTEXT,
+                IntentType.GENERAL_CONVERSATION,
+            }:
+                state.displayed_products = []
+                state.selected_product_id = None
+                state.current_search.clear()
+
+            if intent.intent_type in {
                 IntentType.ADD_TO_CART,
                 IntentType.UPDATE_CART,
                 IntentType.REMOVE_FROM_CART,
