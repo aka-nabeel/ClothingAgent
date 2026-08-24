@@ -72,6 +72,11 @@ class IntentRequest(BaseModel):
                 "clear_cart": IntentType.CLEAR_CART,
                 "get_store_context": IntentType.STORE_CONTEXT,
                 "store_context": IntentType.STORE_CONTEXT,
+                "what_products": IntentType.STORE_CONTEXT,
+                "catalog": IntentType.STORE_CONTEXT,
+                "categories": IntentType.STORE_CONTEXT,
+                "available_products": IntentType.STORE_CONTEXT,
+                "product_catalog": IntentType.STORE_CONTEXT,
                 "place_order": IntentType.PLACE_ORDER,
                 "general_conversation": IntentType.GENERAL_CONVERSATION,
             }

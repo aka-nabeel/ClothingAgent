@@ -112,7 +112,9 @@ class FitzyAgent:
     def _heuristic_extract_intent(self, message: str) -> IntentExtraction:
         msg = message.lower()
         intents = []
-        if any(w in msg for w in ["search", "find", "shirt", "pant", "kurta", "denim", "dress", "show", "buy", "oxford"]):
+        if any(w in msg for w in ["kaun kaun", "kya kya", "what products", "all products", "categories", "range", "collection", "kya hai"]):
+            intents.append(IntentRequest(intent_id="intent-1", intent_type=IntentType.STORE_CONTEXT, parameters={}))
+        elif any(w in msg for w in ["search", "find", "shirt", "pant", "kurta", "denim", "dress", "show", "buy", "oxford"]):
             intents.append(IntentRequest(intent_id="intent-1", intent_type=IntentType.PRODUCT_SEARCH, parameters={"query_text": message}))
         elif any(w in msg for w in ["cart", "add"]):
             intents.append(IntentRequest(intent_id="intent-1", intent_type=IntentType.ADD_TO_CART, parameters={}))

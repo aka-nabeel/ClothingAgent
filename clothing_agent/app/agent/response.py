@@ -67,40 +67,67 @@ class ResponseGuard:
         prods = runtime_context.get("displayed_products", [])
         if language == LanguageMode.ROMAN_URDU:
             if prods:
-                lines = ["Yeh aap ke liye humare store se available options hain:\n"]
+                lines = ["Humare paas behtareen products available hain:\n"]
                 for p in prods:
                     name = p.get("product_name") or p.get("name", "Product")
                     price = p.get("final_price") or p.get("price", "")
                     lines.append(f"- **{name}** (PKR {price})")
+                lines.append("\nAap in mein se kis product ki details dekhna chahte hain?")
                 return "\n".join(lines)
             order = runtime_context.get("placed_order")
             if order:
                 num = order.get("order_number", "")
                 return f"Aap ka order #{num} successfully place ho gaya hai! Northstar se shopping karne ka shukriya."
-            return "Main aap ki shopping mein madad kar sakta hoon. Aap kya dekhna chahenge?"
+            return (
+                "Northstar mein humare paas menswear ki ek behtareen aur vast collection available hai:\n\n"
+                "- Shirts (Formal, Casual, Linen, Oxford)\n"
+                "- T-Shirts (Crew Neck, Graphic, Polo, Compression)\n"
+                "- Pants & Trousers (Chinos, Jeans, Formal Trousers, Cargo)\n"
+                "- Traditional Wear (Kurta, Shalwar Kameez)\n"
+                "- Outerwear (Jackets, Hoodies, Bombers)\n\n"
+                "Aap kis tarah ke kapray ya category dekhna chahte hain taakay main aap ki behtar madad kar sakoon?"
+            )
         elif language == LanguageMode.URDU_SCRIPT:
             if prods:
-                lines = ["یہ ہمارے اسٹور میں دستیاب آپشنز ہیں:\n"]
+                lines = ["یہ ہمارے پاس دستیاب بہترین آپشنز ہیں:\n"]
                 for p in prods:
                     name = p.get("product_name") or p.get("name", "Product")
                     price = p.get("final_price") or p.get("price", "")
                     lines.append(f"- **{name}** (PKR {price})")
+                lines.append("\nآپ ان میں سے کس پروڈکٹ کی مزید تفصیلات دیکھنا چاہتے ہیں؟")
                 return "\n".join(lines)
             order = runtime_context.get("placed_order")
             if order:
                 num = order.get("order_number", "")
                 return f"آپ کا آرڈر #{num} کامیابی سے مکمل ہو گیا ہے۔ نارتھ اسٹار کا انتخاب کرنے کا شکریہ!"
-            return "میں آپ کی خریداری میں مدد کر سکتا ہوں۔ آپ کیا تلاش کر رہے ہیں؟"
+            return (
+                "نارتھ اسٹار میں ہمارے پاس مردانہ ملبوسات کا ایک وسیع اور بہترین کلیکشن موجود ہے:\n\n"
+                "- شرٹس (فارمل، کیژول، لتن، آکسفورڈ)\n"
+                "- ٹی شرٹس (کرو نیک، گرافک، پولو، کمپریشن)\n"
+                "- پینٹس اور ٹراؤزرز (چینو، جینز، فارمل، کارگو)\n"
+                "- روایتی ملبوسات (کرتا، شلوار قمیض)\n"
+                "- آؤٹر ویئر (جیکٹس، ہوڈیز، بمبر)\n\n"
+                "آپ کس قسم کی پروڈکٹ یا کیٹیگری دیکھنا چاہتے ہیں تاکہ میں آپ کی بہترین رہنمائی کر سکوں؟"
+            )
         else:
             if prods:
-                lines = ["Here are the available options found in our store catalog:\n"]
+                lines = ["Here are the top available products from our store:\n"]
                 for p in prods:
                     name = p.get("product_name") or p.get("name", "Product")
                     price = p.get("final_price") or p.get("price", "")
                     lines.append(f"- **{name}** (PKR {price})")
+                lines.append("\nWhich product would you like to explore further?")
                 return "\n".join(lines)
             order = runtime_context.get("placed_order")
             if order:
                 num = order.get("order_number", "")
                 return f"Your order #{num} has been successfully placed! Thank you for shopping with Northstar."
-            return "I am here to assist with your shopping. What are you looking for today?"
+            return (
+                "Northstar carries a vast collection of premium menswear across several key categories:\n\n"
+                "- Shirts (Formal, Casual, Linen, Oxford)\n"
+                "- T-Shirts (Crew Neck, Graphic, Polo, Compression)\n"
+                "- Pants & Trousers (Chinos, Jeans, Formal Trousers, Cargo)\n"
+                "- Traditional Wear (Kurta, Shalwar Kameez)\n"
+                "- Outerwear (Jackets, Hoodies, Bombers)\n\n"
+                "Please let me know which category or product type you would like to explore today so I can assist you!"
+            )
