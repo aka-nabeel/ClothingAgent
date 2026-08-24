@@ -179,7 +179,7 @@ class FitzyAgent:
             if intent.intent_type != IntentType.PRODUCT_SEARCH:
                 continue
 
-            # Check if this is a broad category request without specific filters (e.g., "I want to buy shirts")
+            # Check if this is a broad or vague query without specific filters (e.g., "I want casual", "I want to buy shirts")
             specific_filters = (
                 params.get("colors")
                 or params.get("color")
@@ -194,9 +194,14 @@ class FitzyAgent:
                 or params.get("article_code")
                 or params.get("sku")
             )
-            if not specific_filters:
+            vague_query_words = {"casual", "formal", "party", "something", "clothes", "wear", "items", "stuff", "options", "menswear"}
+            query_str = str(params.get("query_text") or params.get("query") or "").lower().strip()
+            is_vague_query_text = query_str in vague_query_words or query_str.startswith("i want ") or query_str.startswith("show me ")
+
+            if not specific_filters or is_vague_query_text:
                 state.displayed_products = []
                 state.selected_product_id = None
+                state.last_tool_results.pop(ToolName.GET_PRODUCTS.value, None)
 
             # Normalize parameter aliases from LLM extractions
             if "max_price" in params and "maximum_price" not in params:

@@ -68,9 +68,34 @@ class ResponseGuard:
             if language == LanguageMode.URDU_SCRIPT and not re.search(r"[\u0600-\u06FF]", response):
                 return self._fallback_response(language, user_message, runtime_context)
 
-            return response.strip()
+            sanitized = self._sanitize_metadata_if_not_requested(user_message, response.strip())
+            return sanitized
         except Exception:
             return self._fallback_response(language, user_message, runtime_context)
+
+    @staticmethod
+    def _sanitize_metadata_if_not_requested(user_message: str, response: str) -> str:
+        """Enforce business rule: Strip prose metadata dumps unless customer explicitly asked for product details."""
+        msg_lower = user_message.lower()
+        explicit_detail_keywords = {
+            "detail", "details", "fabric", "material", "specification", "specifications",
+            "more info", "tell me about", "tafsilat", "تفصیلات", "معلومات", "kya fabric hai"
+        }
+        if any(w in msg_lower for w in explicit_detail_keywords):
+            return response
+
+        lines = []
+        for line in response.split("\n"):
+            if re.search(r"PKR\s*[\d,]+", line) and ("Cotton" in line or "Linen" in line or "fit" in line or "In-stock" in line or "discount" in line or "welcome" in line):
+                match = re.search(r"(\d+\.\s*|- \s*)?\*?\*?([^*]+?)\*?\*?\s*-\s*.*? (PKR\s*[\d,]+)", line)
+                if match:
+                    prefix = match.group(1) or "- "
+                    title = match.group(2).strip(" -*")
+                    price = match.group(3)
+                    lines.append(f"{prefix}{title} - {price}")
+                    continue
+            lines.append(line)
+        return "\n".join(lines)
 
     def _fallback_response(self, language: LanguageMode, user_message: str, runtime_context: Mapping[str, Any]) -> str:
         prods = runtime_context.get("displayed_products", [])
