@@ -35,24 +35,42 @@ class Base(DeclarativeBase):
     metadata = MetaData(naming_convention=NAMING_CONVENTION)
 
 
-@lru_cache
+import asyncio
+
+_engine: AsyncEngine | None = None
+_engine_loop: asyncio.AbstractEventLoop | None = None
+_session_factory: async_sessionmaker[AsyncSession] | None = None
+
+
 def get_engine() -> AsyncEngine:
-    """Create the async PostgreSQL engine lazily on first database use."""
+    """Create or reuse the async PostgreSQL engine bound to the current running event loop."""
+    global _engine, _engine_loop, _session_factory
+    try:
+        current_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        current_loop = None
 
-    config = get_config()
-    return create_async_engine(
-        config.database_url,
-        pool_pre_ping=True,
-        pool_size=config.database_pool_size,
-        max_overflow=config.database_max_overflow,
-    )
+    if _engine is None or (_engine_loop is not None and current_loop is not None and current_loop is not _engine_loop):
+        config = get_config()
+        _engine = create_async_engine(
+            config.database_url,
+            pool_pre_ping=True,
+            pool_size=config.database_pool_size,
+            max_overflow=config.database_max_overflow,
+        )
+        _engine_loop = current_loop
+        _session_factory = None
+
+    return _engine
 
 
-@lru_cache
 def get_session_factory() -> async_sessionmaker[AsyncSession]:
-    """Return the shared async-session factory."""
-
-    return async_sessionmaker(get_engine(), expire_on_commit=False)
+    """Return the shared async-session factory bound to the current engine."""
+    global _session_factory
+    engine = get_engine()
+    if _session_factory is None:
+        _session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    return _session_factory
 
 
 async def get_db() -> AsyncIterator[AsyncSession]:
@@ -69,6 +87,7 @@ async def get_db() -> AsyncIterator[AsyncSession]:
 
 async def close_database() -> None:
     """Dispose the PostgreSQL pool during application shutdown."""
-
-    if get_engine.cache_info().currsize:
-        await get_engine().dispose()
+    global _engine
+    if _engine is not None:
+        await _engine.dispose()
+        _engine = None

@@ -5,10 +5,10 @@ from pathlib import Path
 root_dir = str(Path(__file__).resolve().parent.parent.parent)
 clothing_app_dir = str(Path(__file__).resolve().parent.parent)
 
-if root_dir not in sys.path:
-    sys.path.insert(0, root_dir)
 if clothing_app_dir not in sys.path:
     sys.path.insert(0, clothing_app_dir)
+if root_dir not in sys.path:
+    sys.path.append(root_dir)
 
 # Ensure 'app' module maps to clothing_app
 for key in list(sys.modules.keys()):

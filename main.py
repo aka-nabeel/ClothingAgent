@@ -15,6 +15,6 @@ for key in list(sys.modules.keys()):
     if key == "app" or key.startswith("app."):
         del sys.modules[key]
 
-from app.main import app
+from clothing_app.app.main import app
 
 __all__ = ["app"]

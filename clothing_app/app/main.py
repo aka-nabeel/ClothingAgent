@@ -1,25 +1,34 @@
-"""FastAPI entrypoint for the unified Northstar Commerce & Fitzy Sales Agent service."""
+import sys
+from pathlib import Path
+
+clothing_app_dir = str(Path(__file__).resolve().parent.parent)
+if clothing_app_dir not in sys.path:
+    sys.path.insert(0, clothing_app_dir)
+
+if "app" in sys.modules and getattr(sys.modules["app"], "__file__", "").find("clothing_agent") != -1:
+    for key in list(sys.modules.keys()):
+        if key == "app" or key.startswith("app."):
+            del sys.modules[key]
 
 import logging
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from app.api.exception_handlers import handle_app_error, handle_unexpected_error
-from app.api.health import router as health_router
-from app.api.middleware import trace_request
-from app.cart.api import router as cart_router
-from app.catalog.api import router as catalog_router
-from app.inventory.api import router as inventory_router
-from app.promotions.api import router as promotions_router
-from app.orders.api import router as orders_router
-from app.config import get_config
-from app.database import close_database
-from app.common.exceptions import AppError
-from app.common.observability import configure_logging
+from .api.exception_handlers import handle_app_error, handle_unexpected_error
+from .api.health import router as health_router
+from .api.middleware import trace_request
+from .cart.api import router as cart_router
+from .catalog.api import router as catalog_router
+from .inventory.api import router as inventory_router
+from .promotions.api import router as promotions_router
+from .orders.api import router as orders_router
+from .config import get_config
+from .database import close_database
+from .common.exceptions import AppError
+from .common.observability import configure_logging
 
 from clothing_agent.app.api.routes import router as agent_router, chat_router, get_agent
 from clothing_agent.app.core.container import get_container
