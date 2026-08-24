@@ -1,173 +1,182 @@
-"""Structured intent models for Fitzy's Phase 2 planning layer.
-
-The LLM populates these models. This module normalizes what the customer
-appears to want into semantic intents that the planner can turn into executable actions.
-"""
-
+"""Structured intent extraction and deterministic language classification for Fitzy."""
 from __future__ import annotations
 
-from enum import StrEnum
-from typing import Any, Union
+import re
+from enum import Enum
+from typing import Any
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from .contracts import ToolName
-from .state import LanguageMode
-
-
-class IntentType(StrEnum):
-    """Customer-level intent names understood by the V1 planner."""
-
-    STORE_CONTEXT = "store_context"
-    PRODUCT_SEARCH = "product_search"
-    PRODUCT_DETAILS = "product_details"
-    BRANCH_INFORMATION = "branch_information"
-    AVAILABILITY_CHECK = "availability_check"
-    CREATE_CART = "create_cart"
-    VIEW_CART = "view_cart"
-    ADD_TO_CART = "add_to_cart"
-    UPDATE_CART = "update_cart"
-    REMOVE_FROM_CART = "remove_from_cart"
-    CLEAR_CART = "clear_cart"
-    CHECKOUT = "checkout"
-    PLACE_ORDER = "place_order"
-    GENERAL_CONVERSATION = "general_conversation"
+from .intents import IntentName, registered_intent_values
 
 
-class IntentRequest(BaseModel):
-    """One normalized customer intent produced by the intent extractor."""
+class LanguageCode(str, Enum):
+    """Languages Fitzy can return to customers."""
 
-    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+    ENGLISH = "english"
+    ROMAN_URDU = "roman_urdu"
+    URDU_SCRIPT = "urdu_script"
 
-    intent_id: str = Field(default="intent-1", min_length=1)
-    intent_type: IntentType = Field(validation_alias=AliasChoices("intent_type", "intent", "name", "type", "tool"))
-    parameters: dict[str, Any] = Field(default_factory=dict)
+
+DEVANAGARI_RE = re.compile(r"[\u0900-\u097F]")
+URDU_SCRIPT_RE = re.compile(r"[\u0600-\u06FF]")
+ROMAN_URDU_HINTS = {
+    "mujhe", "chahiye", "dikhao", "dikha", "karo", "kar do", "hain", "hai",
+    "mera", "meri", "mere", "aap", "apka", "ke", "ki", "ka", "mein",
+    "yeh", "ye", "woh", "wo", "kya", "kitna", "kitni", "sirf", "phir",
+    "shadi", "shaadi", "kapray", "kapre", "acha", "achi", "do",
+}
+
+
+
+def classify_language(text: str, previous: LanguageCode | str | None = None) -> LanguageCode:
+    """Classify user input into English, Roman Urdu, or Urdu script.
+
+    This is deliberately deterministic. The LLM may enrich intent meaning,
+    but it does not choose the response language independently.
+    """
+    text = (text or "").strip()
+    prev_str = previous.value if hasattr(previous, "value") else str(previous) if previous else None
+    prev_lang: LanguageCode | None = None
+    if prev_str:
+        if prev_str in ("urdu_script", "urdu"):
+            prev_lang = LanguageCode.URDU_SCRIPT
+        elif prev_str in ("roman_urdu", "roman urdu", "roman"):
+            prev_lang = LanguageCode.ROMAN_URDU
+        elif prev_str in ("english", "en"):
+            prev_lang = LanguageCode.ENGLISH
+
+    if not text:
+        return prev_lang or LanguageCode.ENGLISH
+
+    if DEVANAGARI_RE.search(text):
+        # Unsupported Hindi/Devanagari never becomes a supported response language.
+        return prev_lang or LanguageCode.ROMAN_URDU
+
+    if URDU_SCRIPT_RE.search(text):
+        return LanguageCode.URDU_SCRIPT
+
+    words = {word.lower() for word in re.findall(r"[A-Za-z']+", text)}
+    roman_hits = len(words & ROMAN_URDU_HINTS)
+    if roman_hits >= 1:
+        return LanguageCode.ROMAN_URDU
+
+    # Preserve an already-established Urdu Script or Roman Urdu conversation
+    if prev_lang in (LanguageCode.URDU_SCRIPT, LanguageCode.ROMAN_URDU):
+        return prev_lang
+
+    return LanguageCode.ENGLISH
+
+
+
+class SearchOverrides(BaseModel):
+    """Ephemeral filters extracted from the current turn."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    categories: list[str] = Field(default_factory=list)
+    product_types: list[str] = Field(default_factory=list)
+    occasions: list[str] = Field(default_factory=list)
+    colors: list[str] = Field(default_factory=list)
+    excluded_colors: list[str] = Field(default_factory=list)
+    size_mapping: dict[str, str] = Field(default_factory=dict)
+    materials: list[str] = Field(default_factory=list)
+    fits: list[str] = Field(default_factory=list)
+    semantic_tags: list[str] = Field(default_factory=list)
+    minimum_price: float | None = None
+    maximum_price: float | None = None
+    branch_reference: str | None = None
+    article_code: str | None = None
+    sku: str | None = None
+
+
+class DeliveryExtraction(BaseModel):
+    """Delivery fields explicitly mentioned by the customer in this turn."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    customer_name: str | None = None
+    phone: str | None = None
+    delivery_address: str | None = None
+    city: str | None = None
+    delivery_notes: str | None = None
+
+
+class ProductReference(BaseModel):
+    """A conversational or explicit product reference."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    index: int | None = None
+    product_id: int | None = None
+    article_code: str | None = None
+    sku: str | None = None
+    text_reference: str | None = None
+
+
+class StructuredIntent(BaseModel):
+    """Closed, structured interpretation of one user message.
+
+    `intents` supports multi-intent messages. `primary_intent` is the first
+    action to consider when multiple actions exist. The model never decides
+    backend truth; it only identifies user intent and explicit parameters.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    intents: list[IntentName] = Field(min_length=1, max_length=8)
+    primary_intent: IntentName | None = None
+
+    language: LanguageCode | None = None
+
+    search_overrides: SearchOverrides = Field(default_factory=SearchOverrides)
+    delivery: DeliveryExtraction = Field(default_factory=DeliveryExtraction)
+
+    product_reference: ProductReference | None = None
+    cart_item_index: int | None = None
+    quantity: int | None = Field(default=None, ge=1)
+
     explicit_confirmation: bool | None = None
-    customer_choice_required: bool = False
+    cancel_requested: bool = False
+    change_topic: bool = False
+    reset_shopping: bool = False
 
-    @field_validator("intent_type", mode="before")
+    unavailable_interest: ProductReference | None = None
+
+    @field_validator("primary_intent")
     @classmethod
-    def normalize_intent_name(cls, value: Any) -> Any:
-        if isinstance(value, str):
-            val = value.lower().strip()
-            aliases = {
-                "get_products": IntentType.PRODUCT_SEARCH,
-                "search_products": IntentType.PRODUCT_SEARCH,
-                "product_search": IntentType.PRODUCT_SEARCH,
-                "search": IntentType.PRODUCT_SEARCH,
-                "get_product_details": IntentType.PRODUCT_DETAILS,
-                "product_details": IntentType.PRODUCT_DETAILS,
-                "details": IntentType.PRODUCT_DETAILS,
-                "get_branches": IntentType.BRANCH_INFORMATION,
-                "branch_information": IntentType.BRANCH_INFORMATION,
-                "check_availability": IntentType.AVAILABILITY_CHECK,
-                "availability_check": IntentType.AVAILABILITY_CHECK,
-                "preview_checkout": IntentType.CHECKOUT,
-                "checkout": IntentType.CHECKOUT,
-                "get_cart": IntentType.VIEW_CART,
-                "view_cart": IntentType.VIEW_CART,
-                "add_to_cart": IntentType.ADD_TO_CART,
-                "update_cart": IntentType.UPDATE_CART,
-                "remove_from_cart": IntentType.REMOVE_FROM_CART,
-                "clear_cart": IntentType.CLEAR_CART,
-                "get_store_context": IntentType.STORE_CONTEXT,
-                "store_context": IntentType.STORE_CONTEXT,
-                "what_products": IntentType.STORE_CONTEXT,
-                "catalog": IntentType.STORE_CONTEXT,
-                "categories": IntentType.STORE_CONTEXT,
-                "available_products": IntentType.STORE_CONTEXT,
-                "product_catalog": IntentType.STORE_CONTEXT,
-                "place_order": IntentType.PLACE_ORDER,
-                "general_conversation": IntentType.GENERAL_CONVERSATION,
-            }
-            if val in aliases:
-                return aliases[val]
+    def validate_primary_intent(
+        cls, value: IntentName | None, info: Any
+    ) -> IntentName | None:
+        if value is None:
+            return value
+        intents = info.data.get("intents") or []
+        if intents and value not in intents:
+            raise ValueError("primary_intent must be one of intents")
         return value
 
-
-class IntentExtraction(BaseModel):
-    """Complete normalized result for one customer message."""
-
-    model_config = ConfigDict(extra="ignore", populate_by_name=True)
-
-    language: LanguageMode = Field(default=LanguageMode.ENGLISH)
-    intents: list[IntentRequest] = Field(default_factory=list)
-
-    @field_validator("language", mode="before")
+    @field_validator("intents", mode="before")
     @classmethod
-    def normalize_language(cls, value: Any) -> Any:
+    def normalize_intents(cls, value: Any) -> Any:
         if isinstance(value, str):
-            val = value.lower().strip()
-            if "roman" in val:
-                return LanguageMode.ROMAN_URDU
-            if "urdu" in val or val in ("ur", "pk", "urdu_script"):
-                return LanguageMode.URDU_SCRIPT
-            if "english" in val or val in ("en", "us", "uk", "eng"):
-                return LanguageMode.ENGLISH
-        return value or LanguageMode.ENGLISH
-
-    @model_validator(mode="before")
-    @classmethod
-    def wrap_single_intent(cls, data: Any) -> Any:
-        if isinstance(data, dict):
-            if "intents" not in data and ("intent" in data or "name" in data or "intent_type" in data):
-                data["intents"] = [data]
-        return data
-
-    @property
-    def is_empty(self) -> bool:
-        """Return True when no actionable intent was extracted."""
-        return not self.intents
+            return [value]
+        if isinstance(value, (list, tuple)):
+            return list(value)
+        raise TypeError("intents must be a string or list of strings")
 
 
-def intent_to_tool(intent_type: IntentType) -> ToolName | None:
-    """Map a semantic customer intent to the canonical tool contract."""
-
-    mapping: dict[IntentType, ToolName] = {
-        IntentType.STORE_CONTEXT: ToolName.GET_STORE_CONTEXT,
-        IntentType.PRODUCT_SEARCH: ToolName.GET_PRODUCTS,
-        IntentType.PRODUCT_DETAILS: ToolName.GET_PRODUCT_DETAILS,
-        IntentType.BRANCH_INFORMATION: ToolName.GET_BRANCHES,
-        IntentType.AVAILABILITY_CHECK: ToolName.CHECK_AVAILABILITY,
-        IntentType.CREATE_CART: ToolName.CREATE_CART,
-        IntentType.VIEW_CART: ToolName.GET_CART,
-        IntentType.ADD_TO_CART: ToolName.ADD_TO_CART,
-        IntentType.UPDATE_CART: ToolName.UPDATE_CART,
-        IntentType.REMOVE_FROM_CART: ToolName.REMOVE_FROM_CART,
-        IntentType.CLEAR_CART: ToolName.CLEAR_CART,
-        IntentType.CHECKOUT: ToolName.PREVIEW_CHECKOUT,
-        IntentType.PLACE_ORDER: ToolName.PLACE_ORDER,
-    }
-    return mapping.get(intent_type)
-
-
-def classify_language(message: str, current_language: LanguageMode | None = None) -> LanguageMode:
-    """Deterministically classify input language into English, Roman Urdu, Urdu script, or fallback from unsupported Hindi."""
-    import re
-
-    # 1. Devanagari / Hindi check: Never adopt Devanagari. Retain established language or default to English.
-    if re.search(r"[\u0900-\u097F]", message):
-        return current_language or LanguageMode.ENGLISH
-
-    # 2. Explicit Urdu Script check: Contains Arabic/Urdu unicode range
-    if re.search(r"[\u0600-\u06FF]", message):
-        return LanguageMode.URDU_SCRIPT
-
-    # 3. Explicit Roman Urdu check: Check for distinctive Roman Urdu tokens
-    roman_urdu_words = {
-        "mujhe", "chahiye", "kuch", "shadi", "karo", "dikhao", "apna", "hai",
-        "hain", "kya", "batao", "kaunsa", "kitne", "pehan", "kapray", "bhej",
-        "do", "kardo", "aacha", "bhi", "wala", "wali", "wale", "karni", "hote",
-        "sub", "sab", "yeh", "woh", "kis", "kisi", "mere", "meri", "humara", "humari"
-    }
-    tokens = set(re.findall(r"\b\w+\b", message.lower()))
-    if tokens & roman_urdu_words:
-        return LanguageMode.ROMAN_URDU
-
-    # 4. If a session language is already established (e.g. URDU_SCRIPT or ROMAN_URDU),
-    # retain established session language on priority instead of drifting to English.
-    if current_language is not None:
-        return current_language
-
-    # 5. Default fallback for initial turn without established language
-    return LanguageMode.ENGLISH
+def build_intent_schema_description() -> str:
+    """Build the closed intent instructions embedded in the LLM system prompt."""
+    lines = [
+        "You MUST select intents only from this registered vocabulary:",
+        *[f"- {intent}" for intent in registered_intent_values()],
+        "",
+        "Multi-intent requests MUST be represented in `intents` as an ordered list.",
+        "Do not invent new intent names.",
+        "Use search_overrides for temporary product filters.",
+        "Use product_reference for phrases such as 'first one', 'that shirt', or an article/SKU.",
+        "Use delivery for customer delivery information explicitly supplied in the message.",
+        "Use explicit_confirmation only when the customer clearly confirms a pending order.",
+        "Never infer backend inventory, price, promotion, branch stock, or order truth.",
+    ]
+    return "\n".join(lines)

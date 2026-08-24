@@ -9,7 +9,9 @@ from uuid import UUID, uuid5, NAMESPACE_DNS
 
 from .contracts import ToolName
 from .execution import ActionExecutionCoordinator
-from .intent import IntentExtraction, IntentRequest, IntentType, classify_language
+from .intent import StructuredIntent, classify_language
+from .intent_prompts import INTENT_EXTRACTION_SYSTEM_PROMPT
+from .intents import IntentName
 from .planner import ActionPlanner
 from .response import ResponseGuard
 from .state import (
@@ -17,12 +19,12 @@ from .state import (
     ConversationState,
     DisplayedProductReference,
     LanguageMode,
+    SearchContext,
 )
 from ..core.config import AgentConfig, get_config
 from ..integration.client import CommerceToolAdapter
 from ..integration.schemas import ProductSearchResponse
 from ..llm.client import LLMClient
-from ..llm.prompts import build_intent_system_prompt
 
 logger = logging.getLogger("fitzy.agent")
 
@@ -99,8 +101,8 @@ class FitzyAgent:
         extraction = await self._extract_intent(message)
 
         extracted_intents_summary = [
-            f"{i.intent_type.value}(params={i.parameters}, confirmation={i.explicit_confirmation})"
-            for i in extraction.intents
+            f"{i.value if hasattr(i, 'value') else str(i)}"
+            for i in getattr(extraction, "intents", [])
         ]
         logger.info(
             "[INTENT EXTRACTED] session=%s | language=%s | intents=%s",
@@ -142,115 +144,96 @@ class FitzyAgent:
         logger.info("[CHAT REPLY] session=%s | reply=%r", session_id, reply)
         return reply
 
-    async def _extract_intent(self, message: str) -> IntentExtraction:
+    async def _extract_intent(self, message: str) -> StructuredIntent:
         """Use the LLM for semantic intent extraction with heuristic fallback."""
         try:
             return await self._llm.generate_structured(
-                system_prompt=build_intent_system_prompt(),
+                system_prompt=INTENT_EXTRACTION_SYSTEM_PROMPT,
                 user_message=message,
-                response_model=IntentExtraction,
+                response_model=StructuredIntent,
             )
         except Exception as exc:
             logger.warning("llm.extraction_failed error=%s falling_back_to_heuristic", exc)
             return self._heuristic_extract_intent(message)
 
-    def _heuristic_extract_intent(self, message: str) -> IntentExtraction:
+    def _heuristic_extract_intent(self, message: str) -> StructuredIntent:
         msg = message.lower()
-        intents = []
         if any(w in msg for w in ["kaun kaun", "kya kya", "what products", "all products", "categories", "range", "collection", "kya hai"]):
-            intents.append(IntentRequest(intent_id="intent-1", intent_type=IntentType.STORE_CONTEXT, parameters={}))
+            return StructuredIntent(intents=[IntentName.BRANCH_INFORMATION])
         elif any(w in msg for w in ["search", "find", "shirt", "pant", "kurta", "denim", "dress", "show", "buy", "oxford"]):
-            intents.append(IntentRequest(intent_id="intent-1", intent_type=IntentType.PRODUCT_SEARCH, parameters={"query_text": message}))
+            return StructuredIntent(intents=[IntentName.PRODUCT_SEARCH], search_overrides={"categories": [message]})
         elif any(w in msg for w in ["cart", "add"]):
-            intents.append(IntentRequest(intent_id="intent-1", intent_type=IntentType.ADD_TO_CART, parameters={}))
+            return StructuredIntent(intents=[IntentName.ADD_TO_CART], product_reference={"index": 1})
         elif any(w in msg for w in ["checkout", "order", "place"]):
-            intents.append(IntentRequest(intent_id="intent-1", intent_type=IntentType.CHECKOUT, parameters={}))
+            return StructuredIntent(intents=[IntentName.CHECKOUT_PREVIEW])
         else:
-            intents.append(IntentRequest(intent_id="intent-1", intent_type=IntentType.GENERAL_CONVERSATION, parameters={"query": message}))
-        return IntentExtraction(language=LanguageMode.ENGLISH, intents=intents)
+            return StructuredIntent(intents=[IntentName.GENERAL_CHAT])
 
-    def _apply_intent_to_state(self, extraction: IntentExtraction, state: ConversationState) -> None:
+    def _apply_intent_to_state(self, extraction: StructuredIntent | Any, state: ConversationState) -> None:
         """Persist turn facts into the correct long-lived or action-scoped state.
 
         Delivery information is accumulated across turns, explicit order
         confirmation is retained for the current execution cycle, and search
         filters update the current search without erasing unrelated preferences.
         """
+        if isinstance(extraction, StructuredIntent):
+            if extraction.delivery:
+                del_dict = extraction.delivery.model_dump(exclude_none=True)
+                self._apply_delivery_fields(del_dict, state)
 
-        for intent in extraction.intents:
-            params = intent.parameters
+            for intent_name in extraction.intents:
+                if intent_name in {IntentName.GENERAL_CHAT, IntentName.BRANCH_INFORMATION} or extraction.change_topic or extraction.reset_shopping:
+                    state.displayed_products = []
+                    state.selected_product_id = None
+                    state.current_search.clear()
 
-            self._apply_delivery_fields(params, state)
-
-            if intent.intent_type in {
-                IntentType.STORE_CONTEXT,
-                IntentType.GENERAL_CONVERSATION,
-            }:
-                state.displayed_products = []
-                state.selected_product_id = None
-                state.current_search.clear()
-
-            if intent.intent_type in {
-                IntentType.ADD_TO_CART,
-                IntentType.UPDATE_CART,
-                IntentType.REMOVE_FROM_CART,
-                IntentType.CLEAR_CART,
-            }:
-                state.last_tool_results["explicit_confirmation"] = None
-                state.last_tool_results.pop(ToolName.PREVIEW_CHECKOUT.value, None)
-
-            if intent.explicit_confirmation is not None and intent.intent_type == IntentType.PLACE_ORDER:
-                if ToolName.PREVIEW_CHECKOUT.value in state.last_tool_results:
-                    state.last_tool_results["explicit_confirmation"] = intent.explicit_confirmation
-                else:
+                if intent_name in {
+                    IntentName.ADD_TO_CART,
+                    IntentName.UPDATE_CART,
+                    IntentName.REMOVE_FROM_CART,
+                    IntentName.CLEAR_CART,
+                }:
                     state.last_tool_results["explicit_confirmation"] = None
+                    state.last_tool_results.pop(ToolName.PREVIEW_CHECKOUT.value, None)
 
-            if intent.intent_type != IntentType.PRODUCT_SEARCH:
-                continue
+                if intent_name == IntentName.PLACE_ORDER and extraction.explicit_confirmation is not None:
+                    if ToolName.PREVIEW_CHECKOUT.value in state.last_tool_results:
+                        state.last_tool_results["explicit_confirmation"] = extraction.explicit_confirmation
+                    else:
+                        state.last_tool_results["explicit_confirmation"] = None
 
-            # Check if this is a broad or vague query without specific filters (e.g., "I want casual", "I want to buy shirts")
-            specific_filters = (
-                params.get("colors")
-                or params.get("color")
-                or params.get("product_types")
-                or params.get("product_type")
-                or params.get("occasions")
-                or params.get("occasion")
-                or params.get("minimum_price")
-                or params.get("maximum_price")
-                or params.get("min_price")
-                or params.get("max_price")
-                or params.get("article_code")
-                or params.get("sku")
-            )
-            vague_query_words = {"casual", "formal", "party", "something", "clothes", "wear", "items", "stuff", "options", "menswear"}
-            query_str = str(params.get("query_text") or params.get("query") or "").lower().strip()
-            is_vague_query_text = query_str in vague_query_words or query_str.startswith("i want ") or query_str.startswith("show me ")
+                if intent_name == IntentName.PRODUCT_SEARCH:
+                    overrides = extraction.search_overrides
+                    params = overrides.model_dump(exclude_none=True)
 
-            if not specific_filters or is_vague_query_text:
-                state.displayed_products = []
-                state.selected_product_id = None
-                state.last_tool_results.pop(ToolName.GET_PRODUCTS.value, None)
+                    specific_filters = (
+                        overrides.colors
+                        or overrides.product_types
+                        or overrides.occasions
+                        or overrides.minimum_price
+                        or overrides.maximum_price
+                        or overrides.article_code
+                        or overrides.sku
+                    )
+                    vague_query_words = {"casual", "formal", "party", "something", "clothes", "wear", "items", "stuff", "options", "menswear"}
+                    cats = overrides.categories or []
+                    query_str = " ".join(cats).lower().strip()
+                    is_vague_query_text = query_str in vague_query_words or query_str.startswith("i want ") or query_str.startswith("show me ")
 
-            # Normalize parameter aliases from LLM extractions
-            if "max_price" in params and "maximum_price" not in params:
-                params["maximum_price"] = params["max_price"]
-            if "min_price" in params and "minimum_price" not in params:
-                params["minimum_price"] = params["min_price"]
-            if "color" in params and "colors" not in params:
-                val = params["color"]
-                params["colors"] = [val] if isinstance(val, str) else val
-            if "category" in params and "categories" not in params:
-                val = params["category"]
-                params["categories"] = [val] if isinstance(val, str) else val
-            if "query" in params and "query_text" not in params:
-                params["query_text"] = params["query"]
+                    if not specific_filters or is_vague_query_text or extraction.change_topic:
+                        state.displayed_products = []
+                        state.selected_product_id = None
+                    state.current_search.update_from_mapping({
+                        key: value
+                        for key, value in params.items()
+                        if key in type(state.current_search).model_fields
+                    })
+        elif hasattr(extraction, "intents"):
+            for intent in getattr(extraction, "intents"):
+                params = getattr(intent, "parameters", {})
+                self._apply_delivery_fields(params, state)
 
-            state.current_search.update_from_mapping({
-                key: value
-                for key, value in params.items()
-                if key in type(state.current_search).model_fields
-            })
+
 
             # Explicit preference language may be represented by the extractor.
             if params.get("remember_preference") is True:

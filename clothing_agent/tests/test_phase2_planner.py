@@ -5,19 +5,19 @@ from typing import Any
 
 from clothing_agent.app.agent.contracts import ToolName
 from clothing_agent.app.agent.execution import ActionExecutionCoordinator
-from clothing_agent.app.agent.intent import IntentExtraction, IntentRequest, IntentType
+from clothing_agent.app.agent.intent import DeliveryExtraction, LanguageCode, SearchOverrides, StructuredIntent
+from clothing_agent.app.agent.intents import IntentName
 from clothing_agent.app.agent.planner import ActionPlanner
 from clothing_agent.app.agent.requirements import ToolRequirementChecker
 from clothing_agent.app.agent.state import ActionStatus, ConversationState, LanguageMode
 
 
 def test_search_and_add_to_cart_are_dependency_ordered() -> None:
-    extraction = IntentExtraction(
-        language=LanguageMode.ENGLISH,
-        intents=[
-            IntentRequest(intent_id="search", intent_type=IntentType.PRODUCT_SEARCH, parameters={"categories": ["shirts"]}),
-            IntentRequest(intent_id="add", intent_type=IntentType.ADD_TO_CART, parameters={"quantity": 1}),
-        ],
+    extraction = StructuredIntent(
+        language=LanguageCode.ENGLISH,
+        intents=[IntentName.PRODUCT_SEARCH, IntentName.ADD_TO_CART],
+        search_overrides=SearchOverrides(categories=["shirts"]),
+        quantity=1,
     )
     plan = ActionPlanner().build_plan(extraction)
     search, create_cart, add = plan.actions
@@ -30,12 +30,9 @@ def test_search_and_add_to_cart_are_dependency_ordered() -> None:
 
 
 def test_independent_reads_remain_parallelizable() -> None:
-    extraction = IntentExtraction(
-        language=LanguageMode.ENGLISH,
-        intents=[
-            IntentRequest(intent_id="p", intent_type=IntentType.PRODUCT_SEARCH),
-            IntentRequest(intent_id="b", intent_type=IntentType.BRANCH_INFORMATION),
-        ],
+    extraction = StructuredIntent(
+        language=LanguageCode.ENGLISH,
+        intents=[IntentName.PRODUCT_SEARCH, IntentName.BRANCH_INFORMATION],
     )
     plan = ActionPlanner().build_plan(extraction)
     assert all(not action.dependency_ids for action in plan.actions)
@@ -43,22 +40,16 @@ def test_independent_reads_remain_parallelizable() -> None:
 
 def test_place_order_inserts_checkout_prerequisite() -> None:
     state = ConversationState()
-    extraction = IntentExtraction(
-        language=LanguageMode.ENGLISH,
-        intents=[
-            IntentRequest(
-                intent_id="order",
-                intent_type=IntentType.PLACE_ORDER,
-                explicit_confirmation=True,
-                parameters={
-                    "customer_name": "Ahmed",
-                    "phone": "0300",
-                    "delivery_address": "DHA",
-                    "city": "Lahore",
-                    "explicit_confirmation": True,
-                },
-            )
-        ],
+    extraction = StructuredIntent(
+        language=LanguageCode.ENGLISH,
+        intents=[IntentName.PLACE_ORDER],
+        explicit_confirmation=True,
+        delivery=DeliveryExtraction(
+            customer_name="Ahmed",
+            phone="0300",
+            delivery_address="DHA",
+            city="Lahore",
+        ),
     )
     plan = ActionPlanner().build_plan(extraction, state)
     assert plan.actions[0].tool_name == ToolName.PREVIEW_CHECKOUT
@@ -102,12 +93,9 @@ async def fake_executor(tool_name: ToolName, parameters: dict[str, Any]) -> dict
 def test_ready_independent_actions_execute() -> None:
     async def scenario() -> None:
         state = ConversationState()
-        extraction = IntentExtraction(
-            language=LanguageMode.ENGLISH,
-            intents=[
-                IntentRequest(intent_id="p", intent_type=IntentType.PRODUCT_SEARCH),
-                IntentRequest(intent_id="b", intent_type=IntentType.BRANCH_INFORMATION),
-            ],
+        extraction = StructuredIntent(
+            language=LanguageCode.ENGLISH,
+            intents=[IntentName.PRODUCT_SEARCH, IntentName.BRANCH_INFORMATION],
         )
         state.action_plan = ActionPlanner().build_plan(extraction)
         result = await ActionExecutionCoordinator().run_ready_actions(state, tool_executor=fake_executor)
@@ -120,11 +108,10 @@ def test_ready_independent_actions_execute() -> None:
 def test_missing_required_parameter_waits_instead_of_calling_api() -> None:
     async def scenario() -> None:
         state = ConversationState()
-        extraction = IntentExtraction(
-            language=LanguageMode.ENGLISH,
-            intents=[
-                IntentRequest(intent_id="add", intent_type=IntentType.ADD_TO_CART, parameters={"quantity": 1}),
-            ],
+        extraction = StructuredIntent(
+            language=LanguageCode.ENGLISH,
+            intents=[IntentName.ADD_TO_CART],
+            quantity=1,
         )
         state.action_plan = ActionPlanner().build_plan(extraction, state)
         result = await ActionExecutionCoordinator().run_ready_actions(state, tool_executor=fake_executor)
@@ -142,3 +129,4 @@ def test_missing_required_parameter_waits_instead_of_calling_api() -> None:
         assert state.action_plan.actions[-1].status == ActionStatus.WAITING_FOR_INPUT
 
     asyncio.run(scenario())
+

@@ -6,7 +6,13 @@ import pytest
 
 from clothing_agent.app.agent.agent import FitzyAgent
 from clothing_agent.app.agent.contracts import ToolName
-from clothing_agent.app.agent.intent import IntentExtraction, IntentRequest, IntentType
+from clothing_agent.app.agent.intent import (
+    LanguageCode,
+    ProductReference,
+    SearchOverrides,
+    StructuredIntent,
+)
+from clothing_agent.app.agent.intents import IntentName
 from clothing_agent.app.agent.state import LanguageMode
 from clothing_agent.app.integration.client import CommerceToolAdapter
 from clothing_agent.app.integration.schemas import CartView, ProductOption, ProductSearchResponse
@@ -55,15 +61,12 @@ class FakeAdapter:
 
 @pytest.mark.asyncio
 async def test_search_uses_llm_intent_and_existing_tool_adapter() -> None:
-    extraction = IntentExtraction(
-        language=LanguageMode.ENGLISH,
-        intents=[
-            IntentRequest(
-                intent_id="1",
-                intent_type=IntentType.PRODUCT_SEARCH,
-                parameters={"categories": ["shirts"], "colors": ["black"], "maximum_price": Decimal("5000")},
-            )
-        ],
+    extraction = StructuredIntent(
+        language=LanguageCode.ENGLISH,
+        intents=[IntentName.PRODUCT_SEARCH],
+        search_overrides=SearchOverrides(
+            categories=["shirts"], colors=["black"], maximum_price=5000.0
+        ),
     )
     llm = FakeLLMClient(extraction, "Here is a suitable black shirt.")
     adapter = FakeAdapter()
@@ -78,13 +81,15 @@ async def test_search_uses_llm_intent_and_existing_tool_adapter() -> None:
 
 @pytest.mark.asyncio
 async def test_add_to_cart_can_use_existing_cart_and_displayed_variant() -> None:
-    search = IntentExtraction(
-        language=LanguageMode.ENGLISH,
-        intents=[IntentRequest(intent_id="1", intent_type=IntentType.PRODUCT_SEARCH, parameters={"categories": ["shirts"]})],
+    search = StructuredIntent(
+        language=LanguageCode.ENGLISH,
+        intents=[IntentName.PRODUCT_SEARCH],
+        search_overrides=SearchOverrides(categories=["shirts"]),
     )
-    add = IntentExtraction(
-        language=LanguageMode.ENGLISH,
-        intents=[IntentRequest(intent_id="2", intent_type=IntentType.ADD_TO_CART, parameters={"product_reference": 1})],
+    add = StructuredIntent(
+        language=LanguageCode.ENGLISH,
+        intents=[IntentName.ADD_TO_CART],
+        product_reference=ProductReference(index=1),
     )
 
     class SequenceLLM(FakeLLMClient):
@@ -114,9 +119,9 @@ async def test_add_to_cart_can_use_existing_cart_and_displayed_variant() -> None
 
 @pytest.mark.asyncio
 async def test_urdu_response_rejects_devanagari() -> None:
-    extraction = IntentExtraction(
-        language=LanguageMode.ROMAN_URDU,
-        intents=[IntentRequest(intent_id="1", intent_type=IntentType.GENERAL_CONVERSATION)],
+    extraction = StructuredIntent(
+        language=LanguageCode.ROMAN_URDU,
+        intents=[IntentName.GENERAL_CHAT],
     )
 
     class UnsafeLLM(FakeLLMClient):
@@ -134,9 +139,9 @@ async def test_urdu_response_rejects_devanagari() -> None:
 
 @pytest.mark.asyncio
 async def test_explicit_language_override_and_config_toggle() -> None:
-    extraction = IntentExtraction(
-        language=LanguageMode.URDU_SCRIPT,
-        intents=[IntentRequest(intent_id="1", intent_type=IntentType.GENERAL_CONVERSATION)],
+    extraction = StructuredIntent(
+        language=LanguageCode.URDU_SCRIPT,
+        intents=[IntentName.GENERAL_CHAT],
     )
     llm = FakeLLMClient(extraction, "Hello, how can I help you?")
     adapter = FakeAdapter()
@@ -149,9 +154,9 @@ async def test_explicit_language_override_and_config_toggle() -> None:
 
 @pytest.mark.asyncio
 async def test_english_input_with_urdu_session_forces_urdu_response() -> None:
-    extraction = IntentExtraction(
-        language=LanguageMode.URDU_SCRIPT,
-        intents=[IntentRequest(intent_id="1", intent_type=IntentType.GENERAL_CONVERSATION)],
+    extraction = StructuredIntent(
+        language=LanguageCode.URDU_SCRIPT,
+        intents=[IntentName.GENERAL_CHAT],
     )
 
     class EnglishLeakingLLM(FakeLLMClient):
@@ -172,9 +177,9 @@ async def test_english_input_with_urdu_session_forces_urdu_response() -> None:
 
 @pytest.mark.asyncio
 async def test_mid_chat_language_switching_sequence() -> None:
-    extraction = IntentExtraction(
-        language=LanguageMode.ENGLISH,
-        intents=[IntentRequest(intent_id="1", intent_type=IntentType.GENERAL_CONVERSATION)],
+    extraction = StructuredIntent(
+        language=LanguageCode.ENGLISH,
+        intents=[IntentName.GENERAL_CHAT],
     )
     llm = FakeLLMClient(extraction, "Test Response")
     agent = FitzyAgent(llm=llm, tools=FakeAdapter())  # type: ignore[arg-type]
@@ -198,9 +203,10 @@ async def test_mid_chat_language_switching_sequence() -> None:
 
 @pytest.mark.asyncio
 async def test_vague_query_business_rule_suppresses_cards() -> None:
-    extraction = IntentExtraction(
-        language=LanguageMode.ENGLISH,
-        intents=[IntentRequest(intent_id="1", intent_type=IntentType.PRODUCT_SEARCH, parameters={"query_text": "casual"})],
+    extraction = StructuredIntent(
+        language=LanguageCode.ENGLISH,
+        intents=[IntentName.PRODUCT_SEARCH],
+        search_overrides=SearchOverrides(categories=["casual"]),
     )
     llm = FakeLLMClient(extraction, "Could you specify what casual wear you want?")
     agent = FitzyAgent(llm=llm, tools=FakeAdapter())  # type: ignore[arg-type]
@@ -210,3 +216,4 @@ async def test_vague_query_business_rule_suppresses_cards() -> None:
     assert state.displayed_products == []
     context = agent._build_runtime_context(state)
     assert context["product_cards"] == []
+

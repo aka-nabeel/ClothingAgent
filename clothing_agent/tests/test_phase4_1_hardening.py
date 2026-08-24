@@ -4,15 +4,17 @@ import pytest
 
 from clothing_agent.app.agent.agent import FitzyAgent
 from clothing_agent.app.agent.contracts import ToolName
-from clothing_agent.app.agent.intent import IntentExtraction, IntentRequest, IntentType
+from clothing_agent.app.agent.intent import LanguageCode, SearchOverrides, StructuredIntent
+from clothing_agent.app.agent.intents import IntentName
 from clothing_agent.app.agent.state import ConversationState, LanguageMode
 
 
 class StubLLM:
     async def generate_structured(self, *, system_prompt, user_message, response_model):
-        return IntentExtraction(
-            language=LanguageMode.ENGLISH,
-            intents=[IntentRequest(intent_id="search", intent_type=IntentType.PRODUCT_SEARCH, parameters={"colors": ["blue"]})],
+        return StructuredIntent(
+            language=LanguageCode.ENGLISH,
+            intents=[IntentName.PRODUCT_SEARCH],
+            search_overrides=SearchOverrides(colors=["blue"]),
         )
 
     async def generate_text(self, *, system_prompt, user_message):
@@ -92,12 +94,13 @@ async def test_agent_checkout_confirmation_invalidation_on_cart_mutation():
     state.last_tool_results["explicit_confirmation"] = True
 
     # Extracted intent for cart addition
-    extraction = IntentExtraction(
-        language=LanguageMode.ENGLISH,
-        intents=[IntentRequest(intent_id="add", intent_type=IntentType.ADD_TO_CART, parameters={"variant_id": 10})],
+    extraction = StructuredIntent(
+        language=LanguageCode.ENGLISH,
+        intents=[IntentName.ADD_TO_CART],
     )
     agent._apply_intent_to_state(extraction, state)
 
     assert state.last_tool_results.get("explicit_confirmation") is None
     assert ToolName.PREVIEW_CHECKOUT.value not in state.last_tool_results
+
 
