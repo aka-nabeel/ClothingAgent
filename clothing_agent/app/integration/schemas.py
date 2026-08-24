@@ -12,7 +12,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 
 class ProductSearchRequest(BaseModel):
@@ -39,17 +39,17 @@ class ProductSearchRequest(BaseModel):
 class ProductOption(BaseModel):
     """Normalized product option returned by the existing search API."""
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
 
-    product_id: int
-    variant_id: int
-    branch_id: int
-    article_code: str
-    product_name: str
+    product_id: int = 0
+    variant_id: int = 0
+    branch_id: int = 0
+    article_code: str = ""
+    product_name: str = ""
     category: str | None = None
     color: str | None = None
     size: str | None = None
-    price: Decimal
+    price: Decimal = Field(default=Decimal("0.00"), validation_alias=AliasChoices("price", "base_selling_price"))
     branch_code: str | None = None
     branch_name: str | None = None
     city: str | None = None

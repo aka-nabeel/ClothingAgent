@@ -8,7 +8,7 @@ from typing import Any
 
 from .contracts import ToolName
 from .execution import ActionExecutionCoordinator
-from .intent import IntentExtraction, IntentRequest, IntentType
+from .intent import IntentExtraction, IntentRequest, IntentType, classify_language
 from .planner import ActionPlanner
 from .response import ResponseGuard
 from .state import (
@@ -50,8 +50,9 @@ class FitzyAgent:
         logger.info("message.received session=%s", session_id)
 
         extraction = await self._extract_intent(message)
-        state.set_language(extraction.language)
-        logger.info("intent.extracted session=%s language=%s intents=%s", session_id, extraction.language, [i.intent_type.value for i in extraction.intents])
+        det_language = classify_language(message, state.language)
+        state.set_language(det_language)
+        logger.info("intent.extracted session=%s language=%s intents=%s", session_id, state.language, [i.intent_type.value for i in extraction.intents])
 
         waiting_actions = [action.model_copy(deep=True) for action in state.action_plan.actions if action.status == ActionStatus.WAITING_FOR_INPUT]
         self._apply_intent_to_state(extraction, state)
@@ -126,6 +127,20 @@ class FitzyAgent:
 
             if intent.intent_type != IntentType.PRODUCT_SEARCH:
                 continue
+
+            # Normalize parameter aliases from LLM extractions
+            if "max_price" in params and "maximum_price" not in params:
+                params["maximum_price"] = params["max_price"]
+            if "min_price" in params and "minimum_price" not in params:
+                params["minimum_price"] = params["min_price"]
+            if "color" in params and "colors" not in params:
+                val = params["color"]
+                params["colors"] = [val] if isinstance(val, str) else val
+            if "category" in params and "categories" not in params:
+                val = params["category"]
+                params["categories"] = [val] if isinstance(val, str) else val
+            if "query" in params and "query_text" not in params:
+                params["query_text"] = params["query"]
 
             state.current_search.update_from_mapping({
                 key: value
@@ -259,12 +274,22 @@ class FitzyAgent:
 
         if action.tool_name == ToolName.GET_PRODUCT_DETAILS:
             product_id = params.get("product_id")
-            reference = params.get("product_reference") or params.get("display_index")
+            reference = (
+                params.get("product_reference")
+                or params.get("display_index")
+                or params.get("product_index")
+                or params.get("index")
+                or params.get("reference")
+            )
             if product_id is None and reference is not None:
                 product_id = self._resolve_displayed_product_id(state, reference)
-                if product_id is not None:
-                    params["product_id"] = product_id
-                    state.remember_selected_product(product_id)
+            if product_id is None and state.displayed_products:
+                product_id = state.displayed_products[0].product_id
+            if product_id is None and state.selected_product_id:
+                product_id = state.selected_product_id
+            if product_id is not None:
+                params["product_id"] = product_id
+                state.remember_selected_product(product_id)
 
         if action.tool_name == ToolName.ADD_TO_CART:
             reference = params.get("product_reference") or params.get("display_index")
@@ -316,14 +341,23 @@ class FitzyAgent:
 
     @staticmethod
     def _resolve_displayed_product_id(state: ConversationState, reference: Any) -> int | None:
-        """Resolve '1', '2', etc. against the latest displayed product set."""
+        """Resolve '1', '2', 'first', etc. against the latest displayed product set."""
 
+        if isinstance(reference, str):
+            ref_str = reference.lower().strip()
+            word_map = {"first": 1, "1st": 1, "second": 2, "2nd": 2, "third": 3, "3rd": 3}
+            if ref_str in word_map:
+                reference = word_map[ref_str]
         try:
             index = int(reference)
         except (TypeError, ValueError):
-            return None
+            index = 1
         match = next((item for item in state.displayed_products if item.index == index), None)
-        return match.product_id if match else None
+        if match:
+            return match.product_id
+        if state.displayed_products:
+            return state.displayed_products[0].product_id
+        return None
 
     def _resolve_variant_from_latest_search(self, state: ConversationState, reference: Any, params: dict[str, Any]) -> Any | None:
         """Resolve a displayed product to one unambiguous available variant."""

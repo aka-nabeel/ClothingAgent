@@ -9,9 +9,12 @@ operations concurrently.
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
+
+logger = logging.getLogger("fitzy.execution")
 
 from .contracts import RequirementCheckResult, TOOL_CONTRACTS, ToolName
 from .requirements import ToolRequirementChecker
@@ -85,6 +88,7 @@ class ActionExecutionCoordinator:
             try:
                 result = await tool_executor(action.tool_name, action.parameters)
             except Exception as exc:  # noqa: BLE001 - action state carries failure
+                logger.exception("action_execution_failed tool=%s error=%s", action.tool_name.value, exc)
                 action.status = ActionStatus.FAILED
                 return action, None, exc
             action.status = ActionStatus.COMPLETED

@@ -82,8 +82,8 @@ class CommerceAPIClient:
             "colors": request.colors,
             "excluded_colors": request.excluded_colors,
             "sizes": sizes,
-            "minimum_price": request.minimum_price,
-            "maximum_price": request.maximum_price,
+            "minimum_price": float(request.minimum_price) if request.minimum_price is not None else None,
+            "maximum_price": float(request.maximum_price) if request.maximum_price is not None else None,
             "branch_code": request.branch_code,
             "materials": [],
             "fits": [],
@@ -102,6 +102,29 @@ class CommerceAPIClient:
         if product_id <= 0:
             raise CommerceValidationError("product_id must be greater than zero")
         result = await self._transport.request("GET", f"/api/v1/products/{product_id}")
+        if isinstance(result, dict) and "product" in result and isinstance(result["product"], dict):
+            p = result["product"]
+            pid = p.get("product_id", product_id)
+            code = p.get("article_code", "")
+            name = p.get("product_name", "")
+            opts = []
+            for opt in p.get("variants", []):
+                if isinstance(opt, dict):
+                    opt_dict = dict(opt)
+                    opt_dict.setdefault("product_id", pid)
+                    opt_dict.setdefault("article_code", code)
+                    opt_dict.setdefault("product_name", name)
+                    opts.append(ProductOption.model_validate(opt_dict))
+            return ProductDetails(
+                product_id=pid,
+                article_code=code,
+                product_name=name,
+                category=p.get("category"),
+                description=p.get("description"),
+                attributes=p.get("attributes", {}),
+                image_urls=[img.get("image_url") for img in p.get("images", []) if isinstance(img, dict) and img.get("image_url")] if "images" in p else p.get("image_urls", []),
+                options=opts
+            )
         return ProductDetails.model_validate(result)
 
     async def get_branches(self) -> list[BranchView]:

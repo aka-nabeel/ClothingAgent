@@ -17,8 +17,20 @@ class AppContainer:
 
     def __init__(self, config: AgentConfig) -> None:
         self.config = config
-        self.http = httpx.AsyncClient(base_url=config.clothing_app_base_url, timeout=config.clothing_app_timeout_seconds)
-        self.transport = AsyncJSONTransport(config.clothing_app_base_url, client=self.http)
+
+        try:
+            from clothing_app.app.main import app as commerce_app
+            self.http = httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=commerce_app),
+                base_url="http://test",
+                timeout=config.clothing_app_timeout_seconds,
+            )
+            base_url = "http://test"
+        except Exception:
+            self.http = httpx.AsyncClient(base_url=config.clothing_app_base_url, timeout=config.clothing_app_timeout_seconds)
+            base_url = config.clothing_app_base_url
+
+        self.transport = AsyncJSONTransport(base_url, client=self.http)
         self.commerce_client = CommerceAPIClient(self.transport, {})
         self.tool_adapter = CommerceToolAdapter(self.commerce_client)
         self.llm = OpenAICompatibleLLMClient(

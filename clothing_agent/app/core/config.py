@@ -27,14 +27,14 @@ class AgentConfig(BaseSettings):
     log_backup_count: int = Field(default=5, ge=1, le=20)
     state_dir: Path = Path("state/sessions")
 
-    clothing_app_base_url: str = "http://127.0.0.1:8100"
+    clothing_app_base_url: str = "http://127.0.0.1:8000"
     clothing_app_timeout_seconds: float = Field(default=12.0, gt=0, le=120)
 
     # Groq exposes an OpenAI-compatible chat-completions API, so the agent only
-    # needs these three provider settings.
+    # needs these provider settings.
     llm_api_base: str = "https://api.groq.com/openai/v1"
     llm_api_key: SecretStr | None = None
-    llm_model: str = "llama-3.3-70b-versatile"
+    llm_model: str = "openai/gpt-oss-120b"
     llm_timeout_seconds: float = Field(default=45.0, gt=0, le=180)
     llm_temperature: float = Field(default=0.2, ge=0, le=2)
     llm_max_tokens: int = Field(default=500, ge=80, le=4000)
@@ -47,9 +47,12 @@ class AgentConfig(BaseSettings):
     @field_validator("llm_api_key", mode="before")
     @classmethod
     def empty_key_is_none(cls, value: object) -> object:
-        """Treat an empty environment variable as an unconfigured API key."""
-
-        return None if value == "" else value
+        """Treat an empty environment variable as an unconfigured API key with fallback to GROQ_API_KEY/OPENAI_API_KEY."""
+        import os
+        if value is None or value == "":
+            fallback = os.getenv("GROQ_API_KEY") or os.getenv("OPENAI_API_KEY")
+            return fallback if fallback else None
+        return value
 
 
 @lru_cache
