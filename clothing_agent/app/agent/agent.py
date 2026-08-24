@@ -179,6 +179,25 @@ class FitzyAgent:
             if intent.intent_type != IntentType.PRODUCT_SEARCH:
                 continue
 
+            # Check if this is a broad category request without specific filters (e.g., "I want to buy shirts")
+            specific_filters = (
+                params.get("colors")
+                or params.get("color")
+                or params.get("product_types")
+                or params.get("product_type")
+                or params.get("occasions")
+                or params.get("occasion")
+                or params.get("minimum_price")
+                or params.get("maximum_price")
+                or params.get("min_price")
+                or params.get("max_price")
+                or params.get("article_code")
+                or params.get("sku")
+            )
+            if not specific_filters:
+                state.displayed_products = []
+                state.selected_product_id = None
+
             # Normalize parameter aliases from LLM extractions
             if "max_price" in params and "maximum_price" not in params:
                 params["maximum_price"] = params["max_price"]

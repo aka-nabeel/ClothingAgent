@@ -76,12 +76,12 @@ class ResponseGuard:
         prods = runtime_context.get("displayed_products", [])
         if language == LanguageMode.ROMAN_URDU:
             if prods:
-                lines = ["Humare paas behtareen products available hain:\n"]
-                for p in prods:
+                lines = ["Okay, yeh humare paas top options hain:\n"]
+                for i, p in enumerate(prods, 1):
                     name = p.get("product_name") or p.get("name", "Product")
                     price = p.get("final_price") or p.get("price", "")
-                    lines.append(f"- **{name}** (PKR {price})")
-                lines.append("\nAap in mein se kis product ki details dekhna chahte hain?")
+                    lines.append(f"{i}. {name} - PKR {price}")
+                lines.append("\nAap in mein se kis product ko cart mein add karna chahte hain ya mazeed options dekhna chahte hain?")
                 return "\n".join(lines)
             order = runtime_context.get("placed_order")
             if order:
@@ -94,16 +94,16 @@ class ResponseGuard:
                 "- Pants & Trousers (Chinos, Jeans, Formal Trousers, Cargo)\n"
                 "- Traditional Wear (Kurta, Shalwar Kameez)\n"
                 "- Outerwear (Jackets, Hoodies, Bombers)\n\n"
-                "Aap kis tarah ke kapray ya category dekhna chahte hain taakay main aap ki behtar madad kar sakoon?"
+                "Aap kis tarah ke kapray ya subcategory dekhna chahte hain taakay main aap ki behtar madad kar sakoon?"
             )
         elif language == LanguageMode.URDU_SCRIPT:
             if prods:
-                lines = ["یہ ہمارے پاس دستیاب بہترین آپشنز ہیں:\n"]
-                for p in prods:
+                lines = ["یہ ہمارے پاس چند بہترین آپشنز ہیں:\n"]
+                for i, p in enumerate(prods, 1):
                     name = p.get("product_name") or p.get("name", "Product")
                     price = p.get("final_price") or p.get("price", "")
-                    lines.append(f"- **{name}** (PKR {price})")
-                lines.append("\nآپ ان میں سے کس پروڈکٹ کی مزید تفصیلات دیکھنا چاہتے ہیں؟")
+                    lines.append(f"{i}. {name} - PKR {price}")
+                lines.append("\nآپ ان میں سے کس پروڈکٹ کو کارٹ میں شامل کرنا چاہتے ہیں یا مزید آپشنز دیکھنا چاہتے ہیں؟")
                 return "\n".join(lines)
             order = runtime_context.get("placed_order")
             if order:
@@ -116,16 +116,16 @@ class ResponseGuard:
                 "- پینٹس اور ٹراؤزرز (چینو، جینز، فارمل، کارگو)\n"
                 "- روایتی ملبوسات (کرتا، شلوار قمیض)\n"
                 "- آؤٹر ویئر (جیکٹس، ہوڈیز، بمبر)\n\n"
-                "آپ کس قسم کی پروڈکٹ یا کیٹیگری دیکھنا چاہتے ہیں تاکہ میں آپ کی بہترین رہنمائی کر سکوں؟"
+                "آپ کس سب کیٹیگری میں سے پروڈکٹس دیکھنا چاہتے ہیں تاکہ میں آپ کی بہترین رہنمائی کر سکوں؟"
             )
         else:
             if prods:
-                lines = ["Here are the top available products from our store:\n"]
-                for p in prods:
+                lines = ["Okay, here are a few top picks for you:\n"]
+                for i, p in enumerate(prods, 1):
                     name = p.get("product_name") or p.get("name", "Product")
                     price = p.get("final_price") or p.get("price", "")
-                    lines.append(f"- **{name}** (PKR {price})")
-                lines.append("\nWhich product would you like to explore further?")
+                    lines.append(f"{i}. {name} - PKR {price}")
+                lines.append("\nWhich product catches your attention and would you like to add to cart, or would you like more options?")
                 return "\n".join(lines)
             order = runtime_context.get("placed_order")
             if order:
