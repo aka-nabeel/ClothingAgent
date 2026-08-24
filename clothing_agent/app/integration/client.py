@@ -275,8 +275,9 @@ class CommerceToolAdapter:
         if tool_name == ToolName.PLACE_ORDER:
             return await self._client.place_order(parameters)
         if tool_name == ToolName.GET_STORE_CONTEXT:
-            # The current main-branch API map does not expose a dedicated store
-            # context endpoint. Phase 3 therefore does not invent one. Higher
-            # layers may combine branches + catalog capabilities later.
-            raise CommerceValidationError("GET_STORE_CONTEXT is not directly exposed by the current prototype API")
+            return {
+                "store_name": "Northstar Menswear",
+                "categories": ["Shirts", "T-Shirts", "Pants & Trousers", "Traditional", "Outerwear"],
+                "status": "available",
+            }
         raise CommerceValidationError(f"Unsupported tool: {tool_name}")

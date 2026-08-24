@@ -29,6 +29,21 @@ class ChatResponse(BaseModel):
     state: Optional[dict[str, Any]] = None
 
 
+class SessionResetRequest(BaseModel):
+    """Inbound session reset payload."""
+
+    session_id: str = Field(min_length=1)
+    keep_cart: bool = True
+
+
+class SessionResetResponse(BaseModel):
+    """Session reset output."""
+
+    session_id: str
+    status: str = "reset_successful"
+    state: Optional[dict[str, Any]] = None
+
+
 def get_agent() -> FitzyAgent:
     """Resolve the configured Agent instance.
 
@@ -54,3 +69,42 @@ async def chat(request: ChatRequest, agent: FitzyAgent = Depends(get_agent)) -> 
         response=reply_text,
         state=runtime_context,
     )
+
+
+@router.post("/session/reset", response_model=SessionResetResponse)
+@chat_router.post("/session/reset", response_model=SessionResetResponse)
+@router.post("/session/new", response_model=SessionResetResponse)
+@chat_router.post("/session/new", response_model=SessionResetResponse)
+async def reset_session_endpoint(
+    request: SessionResetRequest,
+    agent: FitzyAgent = Depends(get_agent),
+) -> SessionResetResponse:
+    """Flush session state while leaving cart items intact if keep_cart is True."""
+
+    state = agent.get_state(request.session_id)
+    state.displayed_products = []
+    state.selected_product_id = None
+    state.current_search.clear()
+    if not request.keep_cart:
+        state.cart.cart_id = None
+        state.cart.item_count = 0
+    runtime_context = agent._build_runtime_context(state)
+    return SessionResetResponse(session_id=request.session_id, state=runtime_context)
+
+
+@router.delete("/session/{session_id}", response_model=SessionResetResponse)
+@chat_router.delete("/session/{session_id}", response_model=SessionResetResponse)
+async def delete_session_endpoint(
+    session_id: str,
+    agent: FitzyAgent = Depends(get_agent),
+) -> SessionResetResponse:
+    """Delete session state and clear cart when explicitly requested."""
+
+    state = agent.get_state(session_id)
+    state.displayed_products = []
+    state.selected_product_id = None
+    state.current_search.clear()
+    state.cart.cart_id = None
+    state.cart.item_count = 0
+    runtime_context = agent._build_runtime_context(state)
+    return SessionResetResponse(session_id=session_id, state=runtime_context)
