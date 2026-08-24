@@ -145,3 +145,26 @@ async def test_explicit_language_override_and_config_toggle() -> None:
     await agent.process_message(session_id="s4", message="who are you", language="english")
     state = agent.get_state("s4")
     assert state.language == LanguageMode.ENGLISH
+
+
+@pytest.mark.asyncio
+async def test_english_input_with_urdu_session_forces_urdu_response() -> None:
+    extraction = IntentExtraction(
+        language=LanguageMode.URDU_SCRIPT,
+        intents=[IntentRequest(intent_id="1", intent_type=IntentType.GENERAL_CONVERSATION)],
+    )
+
+    class EnglishLeakingLLM(FakeLLMClient):
+        def __init__(self):
+            super().__init__(extraction, "")
+            self.responses = ["Sure! We have a great selection of shirts for you.", "نارتھ اسٹار میں ہمارے پاس شرٹس کا بہترین کلیکشن موجود ہے۔"]
+
+        async def generate_text(self, *, system_prompt, user_message):
+            return self.responses.pop(0)
+
+    agent = FitzyAgent(llm=EnglishLeakingLLM(), tools=FakeAdapter())  # type: ignore[arg-type]
+    state = agent.get_state("s5")
+    state.set_language("urdu_script")
+
+    reply = await agent.process_message(session_id="s5", message="i want to buy some shirts")
+    assert "نارتھ اسٹار" in reply

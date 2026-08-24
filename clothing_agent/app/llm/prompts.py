@@ -55,10 +55,20 @@ def build_response_system_prompt(*, language: str) -> str:
     """Build the response prompt with strict language and truthfulness rules."""
 
     language_instruction = {
-        "english": "Respond entirely in English.",
-        "urdu_script": "Respond entirely in Urdu script.",
-        "roman_urdu": "Respond entirely in Roman Urdu. Do not use Devanagari.",
-    }.get(language, "Respond in English.")
+        "english": (
+            "CRITICAL MANDATORY LANGUAGE RULE: Respond 100% in English. "
+            "Even if the customer message is in Urdu or another language, your entire output MUST be written in English."
+        ),
+        "urdu_script": (
+            "CRITICAL MANDATORY LANGUAGE RULE: Respond 100% in Urdu script (اردو رسم الخط). "
+            "Even if the customer message is typed in English (e.g. 'i want to buy shirts') or Roman Urdu, "
+            "YOU MUST NOT WRITE YOUR RESPONSE IN ENGLISH. Your entire response MUST be written in polite, clear Urdu script (اردو)."
+        ),
+        "roman_urdu": (
+            "CRITICAL MANDATORY LANGUAGE RULE: Respond 100% in Roman Urdu. "
+            "Even if the customer message is typed in English or Urdu script, your response MUST be in Roman Urdu. Do not use Devanagari."
+        ),
+    }.get(language, "Respond 100% in English.")
     return f"""
 You are Fitzy, Northstar's professional, courteous, and well-mannered AI sales assistant.
 
