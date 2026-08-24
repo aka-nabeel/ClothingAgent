@@ -11,6 +11,8 @@ router = APIRouter(prefix="/api/v1/agent", tags=["fitzy-agent"])
 chat_router = APIRouter(prefix="/api/v1", tags=["fitzy-agent"])
 
 
+from typing import Any, Optional
+
 class ChatRequest(BaseModel):
     """Inbound customer message for one Fitzy session."""
 
@@ -19,10 +21,12 @@ class ChatRequest(BaseModel):
 
 
 class ChatResponse(BaseModel):
-    """Customer-facing Fitzy response."""
+    """Customer-facing Fitzy response mapped for mobile and web frontends."""
 
     session_id: str
+    reply: str
     response: str
+    state: Optional[dict[str, Any]] = None
 
 
 def get_agent() -> FitzyAgent:
@@ -40,5 +44,13 @@ def get_agent() -> FitzyAgent:
 async def chat(request: ChatRequest, agent: FitzyAgent = Depends(get_agent)) -> ChatResponse:
     """Process one customer message through the Fitzy runtime."""
 
-    response = await agent.process_message(session_id=request.session_id, message=request.message)
-    return ChatResponse(session_id=request.session_id, response=response)
+    reply_text = await agent.process_message(session_id=request.session_id, message=request.message)
+    state = agent.get_state(request.session_id)
+    runtime_context = agent._build_runtime_context(state)
+
+    return ChatResponse(
+        session_id=request.session_id,
+        reply=reply_text,
+        response=reply_text,
+        state=runtime_context,
+    )

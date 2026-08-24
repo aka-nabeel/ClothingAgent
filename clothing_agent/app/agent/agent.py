@@ -47,12 +47,22 @@ class FitzyAgent:
         """Process one customer message through the full V1 runtime pipeline."""
 
         state = self.get_state(session_id)
-        logger.info("message.received session=%s", session_id)
+        logger.info("[CHAT INPUT] session=%s | message=%r", session_id, message)
 
         extraction = await self._extract_intent(message)
         det_language = classify_language(message, state.language)
         state.set_language(det_language)
-        logger.info("intent.extracted session=%s language=%s intents=%s", session_id, state.language, [i.intent_type.value for i in extraction.intents])
+        
+        extracted_intents_summary = [
+            f"{i.intent_type.value}(params={i.parameters}, confirmation={i.explicit_confirmation})"
+            for i in extraction.intents
+        ]
+        logger.info(
+            "[INTENT EXTRACTED] session=%s | language=%s | intents=%s",
+            session_id,
+            state.language.value if state.language else "unknown",
+            extracted_intents_summary,
+        )
 
         waiting_actions = [action.model_copy(deep=True) for action in state.action_plan.actions if action.status == ActionStatus.WAITING_FOR_INPUT]
         self._apply_intent_to_state(extraction, state)
@@ -60,17 +70,32 @@ class FitzyAgent:
         plan = self._planner.build_plan(extraction, state)
         self._merge_waiting_actions(plan, waiting_actions)
         state.action_plan = plan
-        logger.info("plan.created session=%s plan=%s actions=%s", session_id, plan.plan_id, [(a.action_id, a.tool_name.value, a.dependency_ids) for a in plan.actions])
+        
+        actions_summary = [
+            f"{a.action_id}:{a.tool_name.value}(params={a.parameters}, missing={a.missing_parameters}, status={a.status.value})"
+            for a in plan.actions
+        ]
+        logger.info(
+            "[PLAN & STATE] session=%s | plan_id=%s | active_search=%s | delivery=%s | cart_items=%d | actions=%s",
+            session_id,
+            plan.plan_id,
+            state.current_search.model_dump(exclude_none=True),
+            state.delivery.model_dump(exclude_none=True),
+            state.cart.item_count,
+            actions_summary,
+        )
 
         self._resolve_known_parameters(state)
         await self._execute_until_waiting(state)
 
         runtime_context = self._build_runtime_context(state)
-        return await self._responses.generate(
+        reply = await self._responses.generate(
             language=state.language or LanguageMode.ENGLISH,
             user_message=message,
             runtime_context=runtime_context,
         )
+        logger.info("[CHAT REPLY] session=%s | reply=%r", session_id, reply)
+        return reply
 
     async def _extract_intent(self, message: str) -> IntentExtraction:
         """Use the LLM for semantic intent extraction with heuristic fallback."""

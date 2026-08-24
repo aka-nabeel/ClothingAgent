@@ -95,9 +95,9 @@ class IntentExtraction(BaseModel):
             val = value.lower().strip()
             if "roman" in val:
                 return LanguageMode.ROMAN_URDU
-            if "urdu" in val:
+            if "urdu" in val or val in ("ur", "pk", "urdu_script"):
                 return LanguageMode.URDU_SCRIPT
-            if "english" in val or "en" in val:
+            if "english" in val or val in ("en", "us", "uk", "eng"):
                 return LanguageMode.ENGLISH
         return value or LanguageMode.ENGLISH
 
