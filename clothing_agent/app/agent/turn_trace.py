@@ -87,12 +87,18 @@ class TurnTrace:
     started: float = field(default_factory=time.perf_counter)
 
     def event(self, label: str, **fields: Any) -> None:
+        field_strs = []
+        for key, value in fields.items():
+            if value in (None, "", [], {}):
+                continue
+            field_strs.append(f"{key}={_safe(value)!r}")
+        formatted_fields = " | ".join(field_strs)
         logger.info(
-            "[%s] request=%s session=%s %s",
+            "[--- %s ---] request=%s session=%s%s",
             label,
-            self.request_id,
+            self.request_id[:8],
             self.session_id,
-            " | ".join(f"{key}={_safe(value)!r}" for key, value in fields.items()),
+            f" | {formatted_fields}" if formatted_fields else "",
         )
 
     def input(self, explicit_language: str | None = None) -> None:
@@ -101,7 +107,7 @@ class TurnTrace:
     def language(self, value: str, source: str = "deterministic") -> None:
         self.event("LANGUAGE", language=value, source=source)
 
-    def intent(self, intents: list[str], extracted: dict[str, Any]) -> None:
+    def intent(self, intents: list[str], extracted: dict[str, Any] | None = None) -> None:
         self.event("INTENT EXTRACTED", intents=intents, extracted=extracted)
 
     def plan(self, plan_id: str, actions: list[Any]) -> None:
@@ -120,5 +126,5 @@ class TurnTrace:
         self.event(
             "CHAT END",
             status=status,
-            duration_ms=round((time.perf_counter() - self.started) * 1000, 2),
+            total_duration_ms=round((time.perf_counter() - self.started) * 1000, 2),
         )

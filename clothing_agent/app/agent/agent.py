@@ -25,6 +25,7 @@ from ..core.config import AgentConfig, get_config
 from ..integration.client import CommerceToolAdapter
 from ..integration.schemas import ProductSearchResponse
 from ..llm.client import LLMClient
+from .tool_tracing import CURRENT_TURN_TRACE
 from .turn_contract import AgentTurnResponse, ContentType
 from .response_builder import (
     build_product_list_response,
@@ -105,8 +106,6 @@ class FitzyAgent:
             resolved_message = message or kwargs.get("message", "")
             state_obj = self.get_state(resolved_session_id)
 
-        logger.info("[CHAT INPUT] session=%s | message=%r | explicit_language=%r", resolved_session_id, resolved_message, language)
-
         # Language Resolution Rule:
         if language:
             state_obj.set_language(language)
@@ -120,12 +119,17 @@ class FitzyAgent:
             f"{i.value if hasattr(i, 'value') else str(i)}"
             for i in getattr(extraction, "intents", [])
         ]
-        logger.info(
-            "[INTENT EXTRACTED] session=%s | language=%s | intents=%s",
-            resolved_session_id,
-            state_obj.language.value if state_obj.language else "unknown",
-            extracted_intents_summary,
-        )
+        
+        trace = CURRENT_TURN_TRACE.get()
+        if trace:
+            trace.intent(extracted_intents_summary)
+        else:
+            logger.info(
+                "[--- INTENT EXTRACTED ---] session=%s | language=%s | intents=%s",
+                resolved_session_id,
+                state_obj.language.value if state_obj.language else "unknown",
+                extracted_intents_summary,
+            )
 
         waiting_actions = [action.model_copy(deep=True) for action in state_obj.action_plan.actions if action.status == ActionStatus.WAITING_FOR_INPUT]
         self._apply_intent_to_state(extraction, state_obj)
@@ -138,15 +142,25 @@ class FitzyAgent:
             f"{a.action_id}:{a.tool_name.value}(params={a.parameters}, missing={a.missing_parameters}, status={a.status.value})"
             for a in plan.actions
         ]
-        logger.info(
-            "[PLAN & STATE] session=%s | plan_id=%s | active_search=%s | delivery=%s | cart_items=%d | actions=%s",
-            resolved_session_id,
-            plan.plan_id,
-            state_obj.current_search.model_dump(exclude_none=True),
-            state_obj.delivery.model_dump(exclude_none=True),
-            state_obj.cart.item_count,
-            actions_summary,
-        )
+        if trace:
+            trace.event(
+                "PLAN & STATE",
+                plan_id=plan.plan_id[:8] if hasattr(plan, "plan_id") and plan.plan_id else None,
+                active_search=state_obj.current_search.model_dump(exclude_none=True),
+                delivery=state_obj.delivery.model_dump(exclude_none=True),
+                cart_items=state_obj.cart.item_count,
+                actions=actions_summary,
+            )
+        else:
+            logger.info(
+                "[--- PLAN & STATE ---] session=%s | plan_id=%s | active_search=%s | delivery=%s | cart_items=%d | actions=%s",
+                resolved_session_id,
+                plan.plan_id,
+                state_obj.current_search.model_dump(exclude_none=True),
+                state_obj.delivery.model_dump(exclude_none=True),
+                state_obj.cart.item_count,
+                actions_summary,
+            )
 
         self._resolve_known_parameters(state_obj)
         await self._execute_until_waiting(state_obj, user_message=resolved_message)
@@ -157,7 +171,6 @@ class FitzyAgent:
             user_message=resolved_message,
             runtime_context=runtime_context,
         )
-        logger.info("[CHAT REPLY] session=%s | reply=%r", resolved_session_id, reply)
 
         lang_str = state_obj.language.value if state_obj.language else "english"
 

@@ -66,15 +66,15 @@ def _wrap_tool(name: str, method: Callable[..., Any]) -> Callable[..., Any]:
         if trace:
             trace.event(
                 "TOOL START",
-                action_id=action_id,
-                intent=intent,
                 tool=name,
+                action_id=action_id[:8],
+                intent=intent,
                 parameters=parameters,
             )
         else:
             logger.info(
-                "[TOOL START] action_id=%s intent=%s tool=%s parameters=%r",
-                action_id, intent, name, parameters,
+                "[--- TOOL START ---] action_id=%s tool=%s parameters=%r",
+                action_id[:8], name, parameters,
             )
         try:
             result = await method(*args, **kwargs)
@@ -83,30 +83,28 @@ def _wrap_tool(name: str, method: Callable[..., Any]) -> Callable[..., Any]:
             if trace:
                 trace.event(
                     "TOOL ERROR",
-                    action_id=action_id,
-                    intent=intent,
                     tool=name,
+                    action_id=action_id[:8],
                     duration_ms=duration,
                     error=str(exc),
                 )
             else:
-                logger.exception("[TOOL ERROR] action_id=%s tool=%s", action_id, name)
+                logger.exception("[--- TOOL ERROR ---] action_id=%s tool=%s", action_id[:8], name)
             raise
         duration = round((time.perf_counter() - start) * 1000, 2)
         summary = _compact_result(result)
         if trace:
             trace.event(
                 "TOOL RESULT",
-                action_id=action_id,
-                intent=intent,
                 tool=name,
+                action_id=action_id[:8],
                 duration_ms=duration,
                 result=summary,
             )
         else:
             logger.info(
-                "[TOOL RESULT] action_id=%s intent=%s tool=%s duration_ms=%s result=%r",
-                action_id, intent, name, duration, summary,
+                "[--- TOOL RESULT ---] action_id=%s tool=%s duration_ms=%s result=%r",
+                action_id[:8], name, duration, summary,
             )
         return result
 
