@@ -58,7 +58,7 @@ def configure_logging(config: AgentConfig) -> None:
     console = logging.StreamHandler()
     console.setFormatter(
         logging.Formatter(
-            "%(asctime)s | %(levelname)s | clothing-agent | %(name)s | %(message)s"
+            "%(levelname)s | clothing-agent | %(name)s | %(message)s"
         )
     )
     console._clothing_agent_handler = True  # type: ignore[attr-defined]

@@ -53,7 +53,7 @@ def configure_logging(config: AppConfig) -> None:
     console = logging.StreamHandler()
     console.setFormatter(
         logging.Formatter(
-            "%(asctime)s | %(levelname)s | clothing-app | %(name)s | %(message)s"
+            "%(levelname)s | clothing-app | %(name)s | %(message)s"
         )
     )
     console._clothing_app_handler = True  # type: ignore[attr-defined]

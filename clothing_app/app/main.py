@@ -27,7 +27,12 @@ from .promotions.api import router as promotions_router
 from .orders.api import router as orders_router
 from .config import get_config
 from .database import close_database
-from .common.exceptions import AppError
+from .common.exceptions import AppError, NotFoundError, ConflictError
+from app.common.exceptions import (
+    AppError as RootAppError,
+    NotFoundError as RootNotFoundError,
+    ConflictError as RootConflictError,
+)
 from .common.observability import configure_logging
 
 from clothing_agent.app.api.routes import router as agent_router, chat_router, get_agent
@@ -89,5 +94,10 @@ if images_dir.exists():
 
 app.middleware("http")(trace_request)
 app.exception_handler(AppError)(handle_app_error)
+app.exception_handler(NotFoundError)(handle_app_error)
+app.exception_handler(ConflictError)(handle_app_error)
+app.exception_handler(RootAppError)(handle_app_error)
+app.exception_handler(RootNotFoundError)(handle_app_error)
+app.exception_handler(RootConflictError)(handle_app_error)
 app.exception_handler(AgentError)(handle_agent_error)
 app.exception_handler(Exception)(handle_unexpected_error)
