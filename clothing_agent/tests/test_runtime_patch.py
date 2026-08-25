@@ -176,3 +176,46 @@ def test_response_builder_constructors() -> None:
     res_order = build_order_response("s1", "english", "Order confirmed!", OrderMock())
     assert res_order.content_type == ContentType.ORDER
     assert res_order.order["order_number"] == "ORD-1234"
+
+
+@pytest.mark.asyncio
+async def test_category_discussion_returns_product_list_cards() -> None:
+    from clothing_agent.app.integration.schemas import ProductOption, ProductSearchResponse
+    from clothing_agent.app.llm.client import FakeLLMClient
+    from clothing_agent.app.agent.intent import LanguageCode, SearchOverrides
+
+    extraction = StructuredIntent(
+        language=LanguageCode.ENGLISH,
+        intents=[IntentName.PRODUCT_SEARCH],
+        search_overrides=SearchOverrides(categories=["pants"], product_types=["formal pants"]),
+    )
+    llm = FakeLLMClient(extraction, "Here are a few options for you. Check from these or let me know if you want other subcategories.")
+
+    class FakeSearchAdapter:
+        async def execute(self, tool_name: ToolName, parameters):
+            if tool_name == ToolName.GET_PRODUCTS:
+                return ProductSearchResponse(
+                    products=[
+                        ProductOption(
+                            product_id=365,
+                            variant_id=1,
+                            branch_id=1,
+                            article_code="NS-PA-001",
+                            product_name="Everyday Chinos",
+                            category="pants",
+                            price=Decimal("4050.00"),
+                            available_quantity=5,
+                            is_available=True,
+                        )
+                    ],
+                    result_count=1,
+                )
+            raise AssertionError(f"Unexpected tool call: {tool_name}")
+
+    agent = FitzyAgent(llm=llm, tools=FakeSearchAdapter())  # type: ignore[arg-type]
+    response = await agent.process_message(session_id="s_cat", message="formal pants")
+
+    assert response.content_type == ContentType.PRODUCT_LIST
+    assert len(response.products) > 0
+    assert response.products[0]["product_name"] == "Everyday Chinos"
+    assert "options" in str(response.reply).lower() or "few" in str(response.reply).lower()

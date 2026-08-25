@@ -239,20 +239,37 @@ class FitzyAgent:
 
     def _heuristic_extract_intent(self, message: str) -> StructuredIntent:
         msg = message.lower()
-        if any(w in msg for w in ["kaun kaun", "kya kya", "what products", "all products", "categories", "range", "collection", "kya hai"]):
+        if any(w in msg for w in ["kaun kaun", "kya kya", "what products", "all products", "categories", "range", "collection", "kya hai"]) and not any(w in msg for w in ["pant", "pants", "shirt", "shirts", "t-shirt", "tshirts", "trouser", "trousers"]):
             return StructuredIntent(intents=[IntentName.BRANCH_INFORMATION])
-        elif any(w in msg for w in ["search", "find", "shirt", "pant", "kurta", "denim", "dress", "show", "buy", "oxford"]):
+        elif any(w in msg for w in ["search", "find", "shirt", "pant", "trouser", "denim", "dress", "show", "buy", "oxford", "chino", "option", "want"]):
             cats = []
+            types = []
             if "shirt" in msg or "oxford" in msg:
                 cats.append("shirts")
-            elif "pant" in msg or "trouser" in msg:
+                if "formal" in msg:
+                    types.append("formal shirts")
+                elif "casual" in msg:
+                    types.append("casual shirts")
+            elif "pant" in msg or "trouser" in msg or "chino" in msg:
                 cats.append("pants")
+                if "formal" in msg:
+                    types.append("formal pants")
+                elif "chino" in msg:
+                    types.append("chinos")
+            elif "t-shirt" in msg or "tshirt" in msg or "polo" in msg:
+                cats.append("t-shirts")
             elif "kurta" in msg:
                 cats.append("traditional")
             elif "jacket" in msg or "outerwear" in msg:
                 cats.append("outerwear")
             
-            overrides = {"categories": cats} if cats else {"query_text": message}
+            overrides = {}
+            if cats:
+                overrides["categories"] = cats
+            if types:
+                overrides["product_types"] = types
+            if not overrides:
+                overrides["query_text"] = message
             return StructuredIntent(intents=[IntentName.PRODUCT_SEARCH], search_overrides=overrides)
         elif any(w in msg for w in ["cart", "add"]):
             return StructuredIntent(intents=[IntentName.ADD_TO_CART], product_reference={"index": 1})
@@ -324,8 +341,6 @@ class FitzyAgent:
             for intent in getattr(extraction, "intents"):
                 params = getattr(intent, "parameters", {})
                 self._apply_delivery_fields(params, state)
-
-
 
             # Explicit preference language may be represented by the extractor.
             if params.get("remember_preference") is True:
@@ -612,12 +627,9 @@ class FitzyAgent:
 
     @staticmethod
     def _is_broad_category_search(search: SearchContext, user_message: str = "") -> bool:
-        """Deterministic Business Rule: Return True if search is a broad category/vague query without specific subcategory filters."""
+        """Deterministic Business Rule: Return True only if search is a vague query without category/product_type/filters."""
 
         msg_lower = user_message.lower().strip()
-        if "show" in msg_lower or "display" in msg_lower:
-            return False
-
         specific_filters = (
             search.colors
             or search.product_types
@@ -628,19 +640,26 @@ class FitzyAgent:
         if specific_filters:
             return False
 
-        broad_terms = {
-            "shirt", "shirts", "t-shirt", "t-shirts", "tshirt", "tshirts",
-            "pant", "pants", "trouser", "trousers", "outerwear", "traditional",
+        vague_terms = {
             "casual", "formal", "party", "something", "clothes", "clothing", "wear",
-            "items", "stuff", "options", "menswear", "collection", "categories", "catalog"
+            "items", "stuff", "menswear", "collection", "categories", "catalog"
         }
 
         cats = [c.lower().strip() for c in (search.categories or [])]
-        if any(c in broad_terms for c in cats):
+
+        if any(c in vague_terms for c in cats):
             return True
 
+        clothing_categories = {"shirt", "shirts", "t-shirt", "t-shirts", "tshirt", "tshirts", "pant", "pants", "trouser", "trousers", "outerwear", "traditional", "chinos", "jeans"}
+        if any(c in clothing_categories for c in cats):
+            return False
+
+        intent_keywords = {"show", "display", "option", "options", "bring", "want", "have", "some", "see", "look", "looking"}
+        if any(w in msg_lower for w in intent_keywords):
+            return False
+
         query_str = str(search.query_text or "").lower().strip()
-        if not query_str or query_str in broad_terms or query_str.startswith("i want "):
+        if query_str in vague_terms or (not query_str and not cats):
             return True
 
         return False

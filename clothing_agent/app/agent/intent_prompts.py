@@ -51,6 +51,8 @@ IMPORTANT RULES:
     exactly enough for downstream normalization.
 22. When a message contains multiple requests, extract all of them rather than
     collapsing to the first request.
+23. When the customer mentions clothing categories (e.g. pants, shirts, t-shirts, outerwear, traditional) or subcategories/styles (e.g. formal pants, chinos, denim, formal shirts, casual shirts), ALWAYS populate `search_overrides.categories` (e.g. ['pants']) and/or `search_overrides.product_types` (e.g. ['formal pants']).
+24. Messages like 'what options we have in pants?', 'I want pants', 'formal pants', 'show me some', 'show me' indicate PRODUCT_SEARCH and MUST populate `search_overrides.categories` and/or `search_overrides.product_types`.
 
 Return ONLY data matching the structured schema.
 """

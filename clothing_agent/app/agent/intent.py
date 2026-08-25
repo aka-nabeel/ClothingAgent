@@ -155,13 +155,32 @@ class StructuredIntent(BaseModel):
             raise ValueError("primary_intent must be one of intents")
         return value
 
+    @field_validator("delivery", "search_overrides", mode="before")
+    @classmethod
+    def normalize_null_objects(cls, value: Any) -> Any:
+        if value is None:
+            return {}
+        return value
+
     @field_validator("intents", mode="before")
     @classmethod
     def normalize_intents(cls, value: Any) -> Any:
         if isinstance(value, str):
             return [value]
         if isinstance(value, (list, tuple)):
-            return list(value)
+            cleaned = []
+            for item in value:
+                if isinstance(item, dict):
+                    name = item.get("name") or item.get("intent") or item.get("intent_name") or item.get("value")
+                    if name:
+                        cleaned.append(name)
+                elif hasattr(item, "value"):
+                    cleaned.append(item.value)
+                elif isinstance(item, str):
+                    cleaned.append(item)
+                else:
+                    cleaned.append(item)
+            return cleaned
         raise TypeError("intents must be a string or list of strings")
 
 

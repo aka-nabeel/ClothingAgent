@@ -104,13 +104,7 @@ class ResponseGuard:
         prods = runtime_context.get("displayed_products", [])
         if language == LanguageMode.ROMAN_URDU:
             if prods:
-                lines = ["Okay, yeh humare paas top options hain:\n"]
-                for i, p in enumerate(prods, 1):
-                    name = p.get("product_name") or p.get("name", "Product")
-                    price = p.get("final_price") or p.get("price", "")
-                    lines.append(f"{i}. {name} - PKR {price}")
-                lines.append("\nAap in mein se kis product ko cart mein add karna chahte hain ya mazeed options dekhna chahte hain?")
-                return "\n".join(lines)
+                return "Yeh aap ke liye chand options hain. Inhein dekhein ya agar aap koi aur subcategory dekhna chahte hain toh bataein!"
             order = runtime_context.get("placed_order")
             if order:
                 num = order.get("order_number", "")
@@ -126,13 +120,7 @@ class ResponseGuard:
             )
         elif language == LanguageMode.URDU_SCRIPT:
             if prods:
-                lines = ["یہ ہمارے پاس چند بہترین آپشنز ہیں:\n"]
-                for i, p in enumerate(prods, 1):
-                    name = p.get("product_name") or p.get("name", "Product")
-                    price = p.get("final_price") or p.get("price", "")
-                    lines.append(f"{i}. {name} - PKR {price}")
-                lines.append("\nآپ ان میں سے کس پروڈکٹ کو کارٹ میں شامل کرنا چاہتے ہیں یا مزید آپشنز دیکھنا چاہتے ہیں؟")
-                return "\n".join(lines)
+                return "یہ آپ کے لیے چند آپشنز ہیں۔ انہیں دیکھیں یا اگر آپ کوئی اور سب کیٹیگری دیکھنا چاہتے ہیں تو بتائیں!"
             order = runtime_context.get("placed_order")
             if order:
                 num = order.get("order_number", "")
@@ -148,13 +136,7 @@ class ResponseGuard:
             )
         else:
             if prods:
-                lines = ["Okay, here are a few top picks for you:\n"]
-                for i, p in enumerate(prods, 1):
-                    name = p.get("product_name") or p.get("name", "Product")
-                    price = p.get("final_price") or p.get("price", "")
-                    lines.append(f"{i}. {name} - PKR {price}")
-                lines.append("\nWhich product catches your attention and would you like to add to cart, or would you like more options?")
-                return "\n".join(lines)
+                return "Here are a few options for you. Check from these or let me know if you want to explore other subcategories!"
             order = runtime_context.get("placed_order")
             if order:
                 num = order.get("order_number", "")
