@@ -168,9 +168,76 @@ export interface ConversationState {
   order_card: OrderCard | null;
 }
 
+export type AgentContentType =
+  | "GENERAL"
+  | "TEXT"
+  | "PRODUCT_LIST"
+  | "PRODUCT_DETAILS"
+  | "CART"
+  | "CHECKOUT"
+  | "ORDER";
+
+export interface ProductOption {
+  product_id: number;
+  variant_id: number;
+  branch_id: number;
+  article_code: string;
+  product_name: string;
+  category: string;
+  gender: string;
+  brand: string;
+  color: string;
+  size: string;
+  price: string | number;
+  branch_code: string;
+  branch_name: string;
+  city: string;
+  available_quantity: number;
+  in_transit_quantity: number;
+  image_url: string | null;
+  material: string | null;
+  fit: string | null;
+  season: string | null;
+  tags: string[];
+  description: string | null;
+  match_score: number;
+  match_reasons: string[];
+  base_price?: string | number;
+  discount_amount?: string | number;
+}
+
+export interface ChatTurnResponse {
+  session_id: string;
+  conversation_id: string;
+  message_id: string;
+  reply: string;
+  response: string;
+  message?: string;
+  active_agent: string;
+  intent: string;
+  content_type?: AgentContentType;
+  products: ProductOption[];
+  product?: Record<string, unknown> | null;
+  cart: CartView | null;
+  checkout?: Record<string, unknown> | null;
+  order?: Record<string, unknown> | null;
+  suggested_actions: string[];
+  ui_actions: string[];
+  state?: ConversationState;
+}
+
 export interface ChatResponse {
   reply: string;
+  response?: string;
   state: ConversationState;
+  content_type?: AgentContentType;
+  products?: ProductOption[];
+  product?: Record<string, unknown> | null;
+  cart?: CartView | null;
+  checkout?: Record<string, unknown> | null;
+  order?: Record<string, unknown> | null;
+  suggested_actions?: string[];
+  ui_actions?: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -182,7 +249,15 @@ export interface TimelineMessage {
   role: MessageRole;
   content: string;
   createdAt: string;
-  products?: ProductView[];
+  products?: (ProductOption | ProductView)[];
+  product?: Record<string, unknown> | null;
+  checkout?: Record<string, unknown> | null;
+  order?: Record<string, unknown> | null;
+  suggestedActions?: string[];
+  activeAgent?: string;
+  intent?: string;
+  contentType?: AgentContentType;
+  uiActions?: string[];
   checkoutPreview?: any;
   deliveryContext?: DeliveryContext;
 }

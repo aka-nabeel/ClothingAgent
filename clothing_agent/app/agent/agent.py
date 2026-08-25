@@ -25,6 +25,14 @@ from ..core.config import AgentConfig, get_config
 from ..integration.client import CommerceToolAdapter
 from ..integration.schemas import ProductSearchResponse
 from ..llm.client import LLMClient
+from .turn_contract import AgentTurnResponse, ContentType
+from .response_builder import (
+    build_product_list_response,
+    build_product_details_response,
+    build_cart_response,
+    build_checkout_response,
+    build_order_response,
+)
 
 logger = logging.getLogger("fitzy.agent")
 
@@ -78,27 +86,35 @@ class FitzyAgent:
 
     async def process_message(
         self,
-        *,
-        session_id: str,
-        message: str,
+        session_id: str | None = None,
+        message: str = "",
         language: str | None = None,
-    ) -> str:
+        state: ConversationState | None = None,
+        context: Any = None,
+        **kwargs: Any,
+    ) -> AgentTurnResponse | str:
         """Process one customer message through the full V1 runtime pipeline."""
 
-        state = self.get_state(session_id)
-        logger.info("[CHAT INPUT] session=%s | message=%r | explicit_language=%r", session_id, message, language)
+        # Flexible parameter resolution for all caller signatures
+        if state is not None:
+            state_obj = state
+            resolved_session_id = str(state_obj.session_id)
+            resolved_message = message if message else (session_id if isinstance(session_id, str) else "")
+        else:
+            resolved_session_id = session_id or kwargs.get("session_id", "default_session")
+            resolved_message = message or kwargs.get("message", "")
+            state_obj = self.get_state(resolved_session_id)
+
+        logger.info("[CHAT INPUT] session=%s | message=%r | explicit_language=%r", resolved_session_id, resolved_message, language)
 
         # Language Resolution Rule:
-        # 1. If explicit `language` parameter is passed in API request (e.g. from UI header dropdown),
-        #    update session state and use it on highest priority.
         if language:
-            state.set_language(language)
+            state_obj.set_language(language)
         else:
-            # 2. Otherwise, detect language from message text to support dynamic mid-chat language switching.
-            det_language = classify_language(message, state.language)
-            state.set_language(det_language)
+            det_language = classify_language(resolved_message, state_obj.language)
+            state_obj.set_language(det_language)
         
-        extraction = await self._extract_intent(message)
+        extraction = await self._extract_intent(resolved_message)
 
         extracted_intents_summary = [
             f"{i.value if hasattr(i, 'value') else str(i)}"
@@ -106,17 +122,17 @@ class FitzyAgent:
         ]
         logger.info(
             "[INTENT EXTRACTED] session=%s | language=%s | intents=%s",
-            session_id,
-            state.language.value if state.language else "unknown",
+            resolved_session_id,
+            state_obj.language.value if state_obj.language else "unknown",
             extracted_intents_summary,
         )
 
-        waiting_actions = [action.model_copy(deep=True) for action in state.action_plan.actions if action.status == ActionStatus.WAITING_FOR_INPUT]
-        self._apply_intent_to_state(extraction, state)
-        self._reopen_waiting_actions_for_new_input(state)
-        plan = self._planner.build_plan(extraction, state)
+        waiting_actions = [action.model_copy(deep=True) for action in state_obj.action_plan.actions if action.status == ActionStatus.WAITING_FOR_INPUT]
+        self._apply_intent_to_state(extraction, state_obj)
+        self._reopen_waiting_actions_for_new_input(state_obj)
+        plan = self._planner.build_plan(extraction, state_obj)
         self._merge_waiting_actions(plan, waiting_actions)
-        state.action_plan = plan
+        state_obj.action_plan = plan
         
         actions_summary = [
             f"{a.action_id}:{a.tool_name.value}(params={a.parameters}, missing={a.missing_parameters}, status={a.status.value})"
@@ -124,25 +140,77 @@ class FitzyAgent:
         ]
         logger.info(
             "[PLAN & STATE] session=%s | plan_id=%s | active_search=%s | delivery=%s | cart_items=%d | actions=%s",
-            session_id,
+            resolved_session_id,
             plan.plan_id,
-            state.current_search.model_dump(exclude_none=True),
-            state.delivery.model_dump(exclude_none=True),
-            state.cart.item_count,
+            state_obj.current_search.model_dump(exclude_none=True),
+            state_obj.delivery.model_dump(exclude_none=True),
+            state_obj.cart.item_count,
             actions_summary,
         )
 
-        self._resolve_known_parameters(state)
-        await self._execute_until_waiting(state, user_message=message)
+        self._resolve_known_parameters(state_obj)
+        await self._execute_until_waiting(state_obj, user_message=resolved_message)
 
-        runtime_context = self._build_runtime_context(state, user_message=message)
+        runtime_context = self._build_runtime_context(state_obj, user_message=resolved_message)
         reply = await self._responses.generate(
-            language=state.language or LanguageMode.ENGLISH,
-            user_message=message,
+            language=state_obj.language or LanguageMode.ENGLISH,
+            user_message=resolved_message,
             runtime_context=runtime_context,
         )
-        logger.info("[CHAT REPLY] session=%s | reply=%r", session_id, reply)
-        return reply
+        logger.info("[CHAT REPLY] session=%s | reply=%r", resolved_session_id, reply)
+
+        lang_str = state_obj.language.value if state_obj.language else "english"
+
+        # Construct authoritative AgentTurnResponse envelope
+        if ToolName.GET_PRODUCTS.value in state_obj.last_tool_results and not self._is_broad_category_search(state_obj.current_search, user_message=resolved_message):
+            search_res = state_obj.last_tool_results[ToolName.GET_PRODUCTS.value]
+            return build_product_list_response(
+                session_id=resolved_session_id,
+                language=lang_str,
+                reply=reply,
+                result=search_res,
+                context=context,
+            )
+        if ToolName.GET_PRODUCT_DETAILS.value in state_obj.last_tool_results:
+            detail_res = state_obj.last_tool_results[ToolName.GET_PRODUCT_DETAILS.value]
+            return build_product_details_response(
+                session_id=resolved_session_id,
+                language=lang_str,
+                reply=reply,
+                result=detail_res,
+            )
+        if ToolName.PLACE_ORDER.value in state_obj.last_tool_results:
+            order_res = state_obj.last_tool_results[ToolName.PLACE_ORDER.value]
+            return build_order_response(
+                session_id=resolved_session_id,
+                language=lang_str,
+                reply=reply,
+                result=order_res,
+            )
+        if ToolName.PREVIEW_CHECKOUT.value in state_obj.last_tool_results:
+            checkout_res = state_obj.last_tool_results[ToolName.PREVIEW_CHECKOUT.value]
+            return build_checkout_response(
+                session_id=resolved_session_id,
+                language=lang_str,
+                reply=reply,
+                result=checkout_res,
+            )
+        if any(k in state_obj.last_tool_results for k in (ToolName.GET_CART.value, ToolName.ADD_TO_CART.value, ToolName.UPDATE_CART.value, ToolName.REMOVE_FROM_CART.value, ToolName.CLEAR_CART.value)):
+            cart_tool = next(k for k in (ToolName.ADD_TO_CART.value, ToolName.UPDATE_CART.value, ToolName.REMOVE_FROM_CART.value, ToolName.CLEAR_CART.value, ToolName.GET_CART.value) if k in state_obj.last_tool_results)
+            cart_res = state_obj.last_tool_results[cart_tool]
+            return build_cart_response(
+                session_id=resolved_session_id,
+                language=lang_str,
+                reply=reply,
+                result=cart_res,
+            )
+
+        return AgentTurnResponse(
+            session_id=resolved_session_id,
+            reply=reply,
+            language=lang_str,
+            content_type=ContentType.GENERAL,
+        )
 
     async def _extract_intent(self, message: str) -> StructuredIntent:
         """Use the LLM for semantic intent extraction with heuristic fallback."""
@@ -161,7 +229,18 @@ class FitzyAgent:
         if any(w in msg for w in ["kaun kaun", "kya kya", "what products", "all products", "categories", "range", "collection", "kya hai"]):
             return StructuredIntent(intents=[IntentName.BRANCH_INFORMATION])
         elif any(w in msg for w in ["search", "find", "shirt", "pant", "kurta", "denim", "dress", "show", "buy", "oxford"]):
-            return StructuredIntent(intents=[IntentName.PRODUCT_SEARCH], search_overrides={"categories": [message]})
+            cats = []
+            if "shirt" in msg or "oxford" in msg:
+                cats.append("shirts")
+            elif "pant" in msg or "trouser" in msg:
+                cats.append("pants")
+            elif "kurta" in msg:
+                cats.append("traditional")
+            elif "jacket" in msg or "outerwear" in msg:
+                cats.append("outerwear")
+            
+            overrides = {"categories": cats} if cats else {"query_text": message}
+            return StructuredIntent(intents=[IntentName.PRODUCT_SEARCH], search_overrides=overrides)
         elif any(w in msg for w in ["cart", "add"]):
             return StructuredIntent(intents=[IntentName.ADD_TO_CART], product_reference={"index": 1})
         elif any(w in msg for w in ["checkout", "order", "place"]):

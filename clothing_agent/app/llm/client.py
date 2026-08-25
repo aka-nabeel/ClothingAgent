@@ -107,6 +107,9 @@ class OpenAICompatibleLLMClient:
 
     async def _chat(self, *, system_prompt: str, user_message: str, json_mode: bool) -> str:
         self._validate_configuration()
+        if json_mode and "json" not in system_prompt.lower() and "json" not in user_message.lower():
+            system_prompt = f"{system_prompt}\nReturn exactly one valid json object."
+
         payload: dict[str, Any] = {
             "model": self._model,
             "messages": [

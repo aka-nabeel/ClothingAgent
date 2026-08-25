@@ -87,30 +87,34 @@ export function useChat() {
       
       const response = await postChat(message, sessionId);
       
-      let fullProducts: ProductView[] = [];
-      if (response.state.product_cards && response.state.product_cards.length > 0) {
+      let fullProducts: (ProductOption | ProductView)[] = [];
+      if (response.products && response.products.length > 0) {
+        fullProducts = response.products;
+      } else if (response.state?.product_cards && response.state.product_cards.length > 0) {
         fullProducts = response.state.product_cards.map(c => c.product);
       }
       
-      if (response.state.current_intent === "get_details" && fullProducts.length === 1) {
-        setActiveDetailsProduct(fullProducts[0]);
+      if (response.state?.current_intent === "get_details" && fullProducts.length === 1 && "product_name" in fullProducts[0]) {
+        setActiveDetailsProduct(fullProducts[0] as unknown as ProductView);
       }
 
-      if (response.state.cart_card) {
+      if (response.cart) {
+        setCart(response.cart as unknown as CartView);
+      } else if (response.state?.cart_card) {
         setCart({
           ...response.state.cart_card,
           total_quantity: response.state.cart_card.item_count,
         } as unknown as CartView);
-      } else if (!response.state.cart?.cart_id) {
+      } else if (!response.state?.cart?.cart_id) {
         setCart(null);
       }
 
       let replyContent = response.reply;
-      let checkoutPreview = response.state.checkout_card || null;
+      let checkoutPreview = response.checkout || response.state?.checkout_card || null;
 
       let deliveryContext = undefined;
       if (checkoutPreview) {
-        deliveryContext = response.state.delivery;
+        deliveryContext = response.state?.delivery;
       }
 
       setMessages((current) => [
@@ -121,6 +125,11 @@ export function useChat() {
           content: replyContent,
           createdAt: new Date().toISOString(),
           products: fullProducts.length > 0 ? fullProducts : undefined,
+          product: response.product,
+          checkout: response.checkout,
+          order: response.order,
+          contentType: response.content_type,
+          uiActions: response.ui_actions,
           checkoutPreview,
           deliveryContext,
         },

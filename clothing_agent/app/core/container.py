@@ -12,6 +12,9 @@ from ..integration.client import CommerceAPIClient, CommerceToolAdapter
 from ..integration.http import AsyncJSONTransport
 
 
+from ..agent.tool_tracing import instrument_agent_tools
+
+
 class AppContainer:
     """Build repositories, clients, tools, and the Fitzy agent once."""
 
@@ -32,7 +35,7 @@ class AppContainer:
 
         self.transport = AsyncJSONTransport(base_url, client=self.http)
         self.commerce_client = CommerceAPIClient(self.transport, {})
-        self.tool_adapter = CommerceToolAdapter(self.commerce_client)
+        self.tool_adapter = instrument_agent_tools(CommerceToolAdapter(self.commerce_client))
         self.llm = OpenAICompatibleLLMClient(
             base_url=config.llm_api_base,
             api_key=config.llm_api_key,
