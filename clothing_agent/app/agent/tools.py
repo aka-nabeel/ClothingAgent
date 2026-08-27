@@ -21,7 +21,12 @@ logger = logging.getLogger(__name__)
 
 
 class AgentTools:
-    """Agent tool layer providing semantic capabilities over the raw REST client."""
+    """DEPRECATED legacy tool wrapper.
+
+    Canonical tool execution in Fitzy is performed via ``CommerceToolAdapter``
+    located in ``clothing_agent.app.integration.tools.CommerceToolAdapter``.
+    This class is retained for backward compatibility with early unit tests.
+    """
 
     def __init__(self, client: ClothingAppClient) -> None:
         self._client = client

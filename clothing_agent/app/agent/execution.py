@@ -80,6 +80,10 @@ class ActionExecutionCoordinator:
 
             action.status = ActionStatus.READY
             action.parameters = check.resolved_parameters
+            if action.tool_name in {ToolName.ADD_TO_CART, ToolName.UPDATE_CART, ToolName.REMOVE_FROM_CART, ToolName.CLEAR_CART, ToolName.PLACE_ORDER}:
+                action.parameters.setdefault("idempotency_key", action.action_id)
+                if action.tool_name == ToolName.PLACE_ORDER:
+                    action.parameters.setdefault("checkout_request_id", action.action_id)
             runnable.append((action, check))
 
         async def execute(item: tuple[PlannedAction, RequirementCheckResult]) -> tuple[PlannedAction, Any, Exception | None]:

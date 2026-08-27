@@ -1,7 +1,7 @@
 import sys
 import os
 
-root_dir = os.path.abspath(os.path.dirname(__file__))
+root_dir = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
 clothing_app_dir = os.path.join(root_dir, "clothing_app")
 
 if clothing_app_dir in sys.path:
@@ -17,6 +17,3 @@ if "app" in sys.modules:
         for key in list(sys.modules.keys()):
             if key == "app" or key.startswith("app."):
                 del sys.modules[key]
-
-
-

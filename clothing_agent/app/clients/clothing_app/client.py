@@ -34,7 +34,10 @@ logger = logging.getLogger(__name__)
 
 
 class ClothingAppClient:
-    """Typed access to product, inventory, and cart APIs.
+    """DEPRECATED legacy HTTP client.
+
+    Canonical HTTP transport in Fitzy is performed via ``CommerceAPIClient``
+    located in ``clothing_agent.app.integration.client.CommerceAPIClient``.
 
     The agent never imports clothing-application repositories, SQLAlchemy
     models, or database sessions. This client is the sole integration boundary.

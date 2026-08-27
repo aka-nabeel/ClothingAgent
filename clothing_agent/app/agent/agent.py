@@ -334,6 +334,28 @@ class FitzyAgent:
                     overrides = extraction.search_overrides
                     params = overrides.model_dump(exclude_none=True)
 
+                    msg_lower = (message or "").lower()
+                    is_pref_language = any(kw in msg_lower for kw in ("prefer", "preference", "remember", "always show", "i like"))
+                    if is_pref_language:
+                        if overrides.colors:
+                            state.preferences.preferred_colors = list(overrides.colors)
+                        if overrides.excluded_colors:
+                            state.preferences.excluded_colors = list(overrides.excluded_colors)
+                        if overrides.categories:
+                            state.preferences.preferred_categories = list(overrides.categories)
+                        if overrides.product_types:
+                            state.preferences.preferred_product_types = list(overrides.product_types)
+                        if overrides.occasions:
+                            state.preferences.preferred_occasions = list(overrides.occasions)
+                        if overrides.materials:
+                            state.preferences.preferred_materials = list(overrides.materials)
+                        if overrides.fits:
+                            state.preferences.preferred_fits = list(overrides.fits)
+                        if overrides.minimum_price is not None:
+                            state.preferences.minimum_price = overrides.minimum_price
+                        if overrides.maximum_price is not None:
+                            state.preferences.maximum_price = overrides.maximum_price
+
                     specific_filters = (
                         overrides.colors
                         or overrides.product_types
@@ -419,15 +441,25 @@ class FitzyAgent:
             if phone_match:
                 state.delivery.phone = phone_match.group(1)
             
-            # Extract Name
-            name_match = re.search(r'(?:my name is|i am|name:?)\s+([A-Za-z\s]+)', message, re.IGNORECASE)
+            # Extract Name (English & Roman Urdu)
+            name_match = re.search(r'(?:my name is|i am|mera naam|name:?)\s+([A-Za-z\s]+)', message, re.IGNORECASE)
             if name_match:
                 state.delivery.customer_name = name_match.group(1).strip(". ")
-            
-            # Extract City / Address
-            for c in ("lahore", "islamabad", "karachi", "rawalpindi", "faisalabad", "multan", "peshawar", "quetta"):
-                if c in m_lower:
-                    state.delivery.city = c.title()
+
+            # Extract City / Address (English, Roman Urdu, Urdu Script)
+            city_map = {
+                "lahore": "Lahore", "لاہور": "Lahore", "لائور": "Lahore",
+                "islamabad": "Islamabad", "اسلام آباد": "Islamabad",
+                "karachi": "Karachi", "کراچی": "Karachi",
+                "rawalpindi": "Rawalpindi", "راولپنڈی": "Rawalpindi",
+                "faisalabad": "Faisalabad", "فیصل آباد": "Faisalabad",
+                "multan": "Multan", "ملتان": "Multan",
+                "peshawar": "Peshawar", "پشاور": "Peshawar",
+                "quetta": "Quetta", "کوئٹہ": "Quetta",
+            }
+            for c_key, canonical_city in city_map.items():
+                if c_key in m_lower:
+                    state.delivery.city = canonical_city
                     if not state.delivery.delivery_address:
                         state.delivery.delivery_address = message.strip()
                     break
@@ -572,7 +604,44 @@ class FitzyAgent:
                     if pid:
                         params["selected_product_id"] = pid
 
+            # Section 3.3: Variant Ownership Validation
+            target_pid = params.get("selected_product_id") or params.get("product_id") or state.selected_product_id
+            vid = params.get("variant_id")
+            if vid is not None and target_pid is not None:
+                if not self._verify_variant_belongs_to_product(state, int(target_pid), int(vid)):
+                    params.pop("variant_id", None)
+
             params.setdefault("quantity", 1)
+
+    @staticmethod
+    def _verify_variant_belongs_to_product(state: ConversationState, product_id: int, variant_id: int) -> bool:
+        """Verify that a variant_id strictly belongs to the specified product_id."""
+
+        det = state.last_tool_results.get(ToolName.GET_PRODUCT_DETAILS.value)
+        if det:
+            det_pid = getattr(det, "product_id", None) or (det.get("product_id") if isinstance(det, dict) else None)
+            if det_pid and int(det_pid) == product_id:
+                opts = getattr(det, "options", None) or (det.get("options") if isinstance(det, dict) else []) or getattr(det, "variants", None) or (det.get("variants") if isinstance(det, dict) else [])
+                for opt in opts:
+                    opt_vid = getattr(opt, "variant_id", None) or (opt.get("variant_id") if isinstance(opt, dict) else None)
+                    if opt_vid and int(opt_vid) == variant_id:
+                        return True
+
+        search_res = state.last_tool_results.get(ToolName.GET_PRODUCTS.value)
+        if search_res:
+            prods = getattr(search_res, "products", None) or (search_res.get("products") if isinstance(search_res, dict) else [])
+            for p in prods:
+                p_pid = getattr(p, "product_id", None) or (p.get("product_id") if isinstance(p, dict) else None)
+                if p_pid and int(p_pid) == product_id:
+                    p_vid = getattr(p, "variant_id", None) or (p.get("variant_id") if isinstance(p, dict) else None)
+                    if p_vid and int(p_vid) == variant_id:
+                        return True
+                    vars_list = getattr(p, "variants", None) or (p.get("variants") if isinstance(p, dict) else [])
+                    for v in vars_list:
+                        v_vid = getattr(v, "variant_id", None) or (v.get("variant_id") if isinstance(v, dict) else None)
+                        if v_vid and int(v_vid) == variant_id:
+                            return True
+        return False
 
         if action.tool_name in (ToolName.UPDATE_CART, ToolName.REMOVE_FROM_CART):
             if getattr(state, "cart", None) and getattr(state.cart, "cart_id", None):
