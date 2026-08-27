@@ -6,7 +6,9 @@ brand exposes different routes later, only this adapter/integration map needs
 to change; Agent intent and planning logic should remain untouched.
 """
 
-from __future__ import annotations
+import logging
+
+logger = logging.getLogger(__name__)
 
 from collections.abc import Mapping
 from typing import Any
@@ -102,19 +104,51 @@ class CommerceAPIClient:
         if product_id <= 0:
             raise CommerceValidationError("product_id must be greater than zero")
         result = await self._transport.request("GET", f"/api/v1/products/{product_id}")
-        if isinstance(result, dict) and "product" in result and isinstance(result["product"], dict):
-            p = result["product"]
+        if isinstance(result, dict):
+            p = result.get("product") if isinstance(result.get("product"), dict) else result
             pid = p.get("product_id", product_id)
             code = p.get("article_code", "")
             name = p.get("product_name", "")
             opts = []
             for opt in p.get("variants", []):
                 if isinstance(opt, dict):
-                    opt_dict = dict(opt)
-                    opt_dict.setdefault("product_id", pid)
-                    opt_dict.setdefault("article_code", code)
-                    opt_dict.setdefault("product_name", name)
-                    opts.append(ProductOption.model_validate(opt_dict))
+                    vid = opt.get("variant_id")
+                    color = opt.get("color", "")
+                    size = opt.get("size", "")
+                    price_str = str(opt.get("final_price", opt.get("price", 0)))
+                    base_price_str = str(opt.get("price", 0))
+                    disc_str = str(opt.get("discount_amount", 0))
+                    b_avails = opt.get("branch_availability") or []
+                    if b_avails and isinstance(b_avails, list):
+                        for ba in b_avails:
+                            if isinstance(ba, dict):
+                                bid = ba.get("branch_id")
+                                bcode = ba.get("branch_code", "")
+                                bname = ba.get("branch_name", "")
+                                bqty = ba.get("available_quantity", 0)
+                                is_avail = ba.get("is_available", True) and bqty > 0
+                                opts.append(ProductOption(
+                                    product_id=pid,
+                                    variant_id=vid,
+                                    branch_id=bid,
+                                    branch_code=bcode,
+                                    branch_name=bname,
+                                    article_code=code,
+                                    product_name=name,
+                                    color=color,
+                                    size=size,
+                                    price=price_str,
+                                    base_price=base_price_str,
+                                    discount_amount=disc_str,
+                                    available_quantity=bqty,
+                                    is_available=is_avail,
+                                ))
+                    else:
+                        opt_dict = dict(opt)
+                        opt_dict.setdefault("product_id", pid)
+                        opt_dict.setdefault("article_code", code)
+                        opt_dict.setdefault("product_name", name)
+                        opts.append(ProductOption.model_validate(opt_dict))
             return ProductDetails(
                 product_id=pid,
                 article_code=code,
@@ -122,7 +156,7 @@ class CommerceAPIClient:
                 category=p.get("category"),
                 description=p.get("description"),
                 attributes=p.get("attributes", {}),
-                image_urls=[img.get("image_url") for img in p.get("images", []) if isinstance(img, dict) and img.get("image_url")] if "images" in p else p.get("image_urls", []),
+                image_urls=[img if isinstance(img, str) else img.get("image_url", "") for img in p.get("images", []) if img],
                 options=opts
             )
         return ProductDetails.model_validate(result)
@@ -254,6 +288,7 @@ class CommerceToolAdapter:
         if tool_name == ToolName.GET_CART:
             return await self._client.get_cart(parameters["cart_id"])
         if tool_name == ToolName.ADD_TO_CART:
+            logger.info("[--- EXECUTE ADD_TO_CART ---] params=%s", dict(parameters))
             return await self._client.add_to_cart(
                 cart_id=parameters["cart_id"],
                 variant_id=int(parameters["variant_id"]),

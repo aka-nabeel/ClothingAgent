@@ -22,6 +22,25 @@ def _branch_map(context: Any) -> dict[str, Any]:
     return {str(_get(b, "branch_code", "")).lower(): b for b in branches}
 
 
+def calculate_authoritative_search_limit(categories: list[str] | None = None) -> int:
+    """Authoritative result-limit policy across Fitzy.
+
+    - ONE CATEGORY (or unspecified): default 3-4 products (4)
+    - TWO CATEGORIES: ~3 per category (6)
+    - THREE+ CATEGORIES: balanced allocation (min 3 * len(cats), 20)
+    - HARD MAXIMUM: 20
+    """
+    if not categories:
+        return 4
+    count = len(categories)
+    if count <= 1:
+        return 4
+    elif count == 2:
+        return 6
+    else:
+        return min(count * 3, 20)
+
+
 def product_options_for_frontend(result: Any, context: Any = None) -> list[dict[str, Any]]:
     """Flatten authoritative ProductView or ProductOption variants into the existing mobile card contract."""
 
@@ -134,7 +153,24 @@ def product_options_for_frontend(result: Any, context: Any = None) -> list[dict[
                     )
 
     products.sort(key=lambda item: (item["available_quantity"] <= 0, item["product_id"], item["variant_id"]))
-    return products[:20]
+    
+    seen_pids = set()
+    unique_products = []
+    for item in products:
+        pid = item["product_id"]
+        if pid not in seen_pids:
+            seen_pids.add(pid)
+            unique_products.append(item)
+
+    cats = None
+    if context:
+        if isinstance(context, dict):
+            cats = context.get("categories") or (context.get("current_search") or {}).get("categories")
+        else:
+            cats = getattr(context, "categories", None)
+
+    limit = calculate_authoritative_search_limit(cats)
+    return unique_products[:limit]
 
 
 def build_product_list_response(

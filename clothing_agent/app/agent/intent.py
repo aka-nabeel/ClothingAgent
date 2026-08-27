@@ -162,6 +162,24 @@ class StructuredIntent(BaseModel):
             return {}
         return value
 
+    @field_validator("product_reference", mode="before")
+    @classmethod
+    def normalize_product_reference(cls, value: Any) -> Any:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            ref_str = value.lower().strip()
+            word_map = {"first": 1, "1st": 1, "one": 1, "second": 2, "2nd": 2, "two": 2, "third": 3, "3rd": 3, "three": 3}
+            idx = None
+            for k, v in word_map.items():
+                if k in ref_str:
+                    idx = v
+                    break
+            return ProductReference(text_reference=value, index=idx)
+        if isinstance(value, int):
+            return ProductReference(index=value)
+        return value
+
     @field_validator("intents", mode="before")
     @classmethod
     def normalize_intents(cls, value: Any) -> Any:
