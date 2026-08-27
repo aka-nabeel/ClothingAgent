@@ -613,36 +613,6 @@ class FitzyAgent:
 
             params.setdefault("quantity", 1)
 
-    @staticmethod
-    def _verify_variant_belongs_to_product(state: ConversationState, product_id: int, variant_id: int) -> bool:
-        """Verify that a variant_id strictly belongs to the specified product_id."""
-
-        det = state.last_tool_results.get(ToolName.GET_PRODUCT_DETAILS.value)
-        if det:
-            det_pid = getattr(det, "product_id", None) or (det.get("product_id") if isinstance(det, dict) else None)
-            if det_pid and int(det_pid) == product_id:
-                opts = getattr(det, "options", None) or (det.get("options") if isinstance(det, dict) else []) or getattr(det, "variants", None) or (det.get("variants") if isinstance(det, dict) else [])
-                for opt in opts:
-                    opt_vid = getattr(opt, "variant_id", None) or (opt.get("variant_id") if isinstance(opt, dict) else None)
-                    if opt_vid and int(opt_vid) == variant_id:
-                        return True
-
-        search_res = state.last_tool_results.get(ToolName.GET_PRODUCTS.value)
-        if search_res:
-            prods = getattr(search_res, "products", None) or (search_res.get("products") if isinstance(search_res, dict) else [])
-            for p in prods:
-                p_pid = getattr(p, "product_id", None) or (p.get("product_id") if isinstance(p, dict) else None)
-                if p_pid and int(p_pid) == product_id:
-                    p_vid = getattr(p, "variant_id", None) or (p.get("variant_id") if isinstance(p, dict) else None)
-                    if p_vid and int(p_vid) == variant_id:
-                        return True
-                    vars_list = getattr(p, "variants", None) or (p.get("variants") if isinstance(p, dict) else [])
-                    for v in vars_list:
-                        v_vid = getattr(v, "variant_id", None) or (v.get("variant_id") if isinstance(v, dict) else None)
-                        if v_vid and int(v_vid) == variant_id:
-                            return True
-        return False
-
         if action.tool_name in (ToolName.UPDATE_CART, ToolName.REMOVE_FROM_CART):
             if getattr(state, "cart", None) and getattr(state.cart, "cart_id", None):
                 params.setdefault("cart_id", str(state.cart.cart_id))
@@ -672,6 +642,36 @@ class FitzyAgent:
             if action.tool_name == ToolName.UPDATE_CART and not params.get("quantity"):
                 qty = params.get("target_quantity") or params.get("new_quantity") or 2
                 params["quantity"] = int(qty)
+
+    @staticmethod
+    def _verify_variant_belongs_to_product(state: ConversationState, product_id: int, variant_id: int) -> bool:
+        """Verify that a variant_id strictly belongs to the specified product_id."""
+
+        det = state.last_tool_results.get(ToolName.GET_PRODUCT_DETAILS.value)
+        if det:
+            det_pid = getattr(det, "product_id", None) or (det.get("product_id") if isinstance(det, dict) else None)
+            if det_pid and int(det_pid) == product_id:
+                opts = getattr(det, "options", None) or (det.get("options") if isinstance(det, dict) else []) or getattr(det, "variants", None) or (det.get("variants") if isinstance(det, dict) else [])
+                for opt in opts:
+                    opt_vid = getattr(opt, "variant_id", None) or (opt.get("variant_id") if isinstance(opt, dict) else None)
+                    if opt_vid and int(opt_vid) == variant_id:
+                        return True
+
+        search_res = state.last_tool_results.get(ToolName.GET_PRODUCTS.value)
+        if search_res:
+            prods = getattr(search_res, "products", None) or (search_res.get("products") if isinstance(search_res, dict) else [])
+            for p in prods:
+                p_pid = getattr(p, "product_id", None) or (p.get("product_id") if isinstance(p, dict) else None)
+                if p_pid and int(p_pid) == product_id:
+                    p_vid = getattr(p, "variant_id", None) or (p.get("variant_id") if isinstance(p, dict) else None)
+                    if p_vid and int(p_vid) == variant_id:
+                        return True
+                    vars_list = getattr(p, "variants", None) or (p.get("variants") if isinstance(p, dict) else [])
+                    for v in vars_list:
+                        v_vid = getattr(v, "variant_id", None) or (v.get("variant_id") if isinstance(v, dict) else None)
+                        if v_vid and int(v_vid) == variant_id:
+                            return True
+        return False
 
     @staticmethod
     def _build_effective_product_search(state: ConversationState, turn_parameters: dict[str, Any]) -> dict[str, Any]:

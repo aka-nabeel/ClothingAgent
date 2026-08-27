@@ -78,9 +78,11 @@ class CommerceAPIClient:
 
         semantic_tags = [*request.product_types, *request.occasions]
         sizes = list(request.size_mapping.values())
+        cats = [category] if category else (request.categories or [])
         payload = {
             "query_text": request.query_text,
             "category": category,
+            "categories": cats,
             "colors": request.colors,
             "excluded_colors": request.excluded_colors,
             "sizes": sizes,

@@ -260,3 +260,17 @@ def test_canonical_normalization_english_urdu_roman():
     assert normalize_confirmation("haan") is True
     assert normalize_confirmation("ہاں") is True
     assert normalize_confirmation("nahi") is False
+
+
+# =====================================================================
+# CATEGORY FILTER & GENERAL INQUIRY VERIFICATION
+# =====================================================================
+def test_category_search_filtering_returns_only_matching_category():
+    client = TestClient(app)
+    res = client.post("/api/v1/products/search", json={"category": "pants", "limit": 4})
+    assert res.status_code == 200
+    data = res.json()
+    assert "products" in data
+    for product in data["products"]:
+        assert product["category"].lower() == "pants", f"Expected pants category but got {product['category']}"
+

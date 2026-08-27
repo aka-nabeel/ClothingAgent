@@ -14,6 +14,7 @@ class ProductSearchRequest(BaseModel):
     """Structured search criteria accepted from the UI or clothing agent."""
 
     query_text: str | None = Field(default=None, max_length=300)
+    category: str | None = Field(default=None, description="Legacy single category parameter")
     categories: list[str] = Field(default_factory=list)
     product_types: list[str] = Field(default_factory=list)
     occasions: list[str] = Field(default_factory=list)
@@ -33,6 +34,19 @@ class ProductSearchRequest(BaseModel):
     in_stock_only: bool = True
     allow_relaxation: bool = True
     limit: int = Field(default=20, ge=1, le=20)
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_category_fields(cls, value: Any) -> Any:
+        """Map singular category field to categories list if categories is empty."""
+        if isinstance(value, dict):
+            cat = value.get("category")
+            cats = value.get("categories")
+            if cat and not cats:
+                value["categories"] = [cat]
+            elif isinstance(cats, str):
+                value["categories"] = [cats]
+        return value
 
     @model_validator(mode="after")
     def validate_price_range(self) -> "ProductSearchRequest":
