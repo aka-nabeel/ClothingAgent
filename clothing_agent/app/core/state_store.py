@@ -11,6 +11,9 @@ from typing import Protocol
 from ..agent.state import ConversationState
 
 
+import hashlib
+
+
 class ConversationStateStore(Protocol):
     """Persistence contract for one conversation state."""
     def load(self, session_id: str) -> ConversationState | None: ...
@@ -25,8 +28,9 @@ class FileConversationStateStore:
         self._directory.mkdir(parents=True, exist_ok=True)
 
     def _path(self, session_id: str) -> Path:
-        safe = "".join(c if c.isalnum() or c in {"-", "_"} else "_" for c in session_id)
-        return self._directory / f"{safe}.json"
+        session_hash = hashlib.sha256(session_id.encode("utf-8")).hexdigest()[:32]
+        safe_prefix = "".join(c if c.isalnum() or c in {"-", "_"} else "_" for c in session_id[:16])
+        return self._directory / f"{safe_prefix}_{session_hash}.json"
 
     def load(self, session_id: str) -> ConversationState | None:
         """Load a persisted session or return None when it does not exist."""

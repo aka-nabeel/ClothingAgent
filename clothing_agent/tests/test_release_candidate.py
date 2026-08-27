@@ -115,7 +115,7 @@ async def test_api_contract_matrix_compatibility():
                     bid = b["branch_id"]
                     res = await client.get(f"/api/v1/inventory/availability?variant_id={v_id}&branch_id={bid}")
                     assert res.status_code == 200
-                    if res.json().get("available_quantity", 0) > 0:
+                    if res.json().get("available_quantity", 0) >= 2:
                         product_id = p["product_id"]
                         variant_id = v_id
                         branch_id = bid

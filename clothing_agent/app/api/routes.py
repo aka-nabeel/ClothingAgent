@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from ..agent.agent import FitzyAgent
@@ -25,6 +25,7 @@ class ChatRequest(BaseModel):
     session_id: str = Field(min_length=1)
     message: str = Field(min_length=1)
     language: Optional[str] = None
+    customer_id: Optional[str] = None
 
 
 class ChatResponse(BaseModel):
@@ -66,13 +67,9 @@ class SessionResetResponse(BaseModel):
 
 
 def get_agent() -> FitzyAgent:
-    """Resolve the configured Agent instance.
-
-    The application bootstrap must replace this dependency with its singleton
-    runtime instance. Keeping the dependency explicit makes testing easy.
-    """
-
-    raise RuntimeError("Fitzy Agent dependency is not configured")
+    """Resolve the configured Agent instance from the application container."""
+    from ..core.container import get_container
+    return get_container().fitzy_agent
 
 
 @router.post("/chat", response_model=ChatResponse)
@@ -84,12 +81,17 @@ async def chat(request: ChatRequest, agent: FitzyAgent = Depends(get_agent)) -> 
     trace.input(request.language)
     token = set_current_trace(trace)
     try:
+        state = agent.get_state(request.session_id)
+        if request.customer_id:
+            if state.customer_id is not None and state.customer_id != request.customer_id:
+                raise HTTPException(status_code=403, detail="Forbidden: Session belongs to another customer")
+            state.customer_id = request.customer_id
+
         turn = await agent.process_message(
             session_id=request.session_id,
             message=request.message,
             language=request.language,
         )
-        state = agent.get_state(request.session_id)
         if request.language:
             state.set_language(request.language)
         runtime_context = agent._build_runtime_context(state)

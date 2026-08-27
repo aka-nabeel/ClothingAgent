@@ -101,8 +101,11 @@ class TurnTrace:
             f" | {formatted_fields}" if formatted_fields else "",
         )
 
-    def input(self, explicit_language: str | None = None) -> None:
-        self.event("CHAT INPUT", message=self.message, explicit_language=explicit_language)
+    def input(self, explicit_language: str | None = None, log_raw: bool = False) -> None:
+        if log_raw:
+            self.event("CHAT INPUT", message=self.message, explicit_language=explicit_language)
+        else:
+            self.event("CHAT INPUT", message_length=len(self.message or ""), explicit_language=explicit_language)
 
     def language(self, value: str, source: str = "deterministic") -> None:
         self.event("LANGUAGE", language=value, source=source)
@@ -119,8 +122,11 @@ class TurnTrace:
     def state(self, **summary: Any) -> None:
         self.event("STATE", **summary)
 
-    def response(self, content_type: str, language: str, reply: str) -> None:
-        self.event("CHAT REPLY", content_type=content_type, language=language, reply=reply)
+    def response(self, content_type: str, language: str, reply: str, log_raw: bool = False) -> None:
+        if log_raw:
+            self.event("CHAT REPLY", content_type=content_type, language=language, reply=reply)
+        else:
+            self.event("CHAT REPLY", content_type=content_type, language=language, reply_length=len(reply or ""))
 
     def end(self, status: str = "success") -> None:
         self.event(

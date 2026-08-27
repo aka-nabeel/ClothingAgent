@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from decimal import Decimal
 from typing import Any
@@ -41,7 +42,14 @@ logger = logging.getLogger("fitzy.agent")
 class FitzyAgent:
     """Coordinate language understanding, planning, requirements and tool execution."""
 
-    def __init__(self, *, llm: LLMClient, tools: CommerceToolAdapter, config: AgentConfig | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        llm: LLMClient,
+        tools: CommerceToolAdapter,
+        config: AgentConfig | None = None,
+        state_store: ConversationStateStore | None = None,
+    ) -> None:
         self._llm = llm
         self._tools = tools
         self._config = config or get_config()
@@ -49,6 +57,14 @@ class FitzyAgent:
         self._execution = ActionExecutionCoordinator()
         self._responses = ResponseGuard(llm)
         self._sessions: dict[str, ConversationState] = {}
+        self._session_locks: dict[str, asyncio.Lock] = {}
+        self._locks_guard = asyncio.Lock()
+        self._state_store = state_store
+
+    def _get_session_lock(self, session_id: str) -> asyncio.Lock:
+        if session_id not in self._session_locks:
+            self._session_locks[session_id] = asyncio.Lock()
+        return self._session_locks[session_id]
 
     def _to_uuid(self, session_id: str | UUID) -> UUID:
         if isinstance(session_id, UUID):
@@ -63,8 +79,20 @@ class FitzyAgent:
 
         key = str(session_id)
         if key not in self._sessions:
+            if self._state_store is not None:
+                loaded = self._state_store.load(key)
+                if loaded is not None:
+                    self._sessions[key] = loaded
+                    return loaded
             self._sessions[key] = ConversationState(session_id=self._to_uuid(session_id))
         return self._sessions[key]
+
+    def save_state(self, state: ConversationState) -> None:
+        """Persist conversation state to storage if configured."""
+        key = str(state.session_id)
+        self._sessions[key] = state
+        if self._state_store is not None:
+            self._state_store.save(state)
 
     def reset_state(
         self,
@@ -82,7 +110,7 @@ class FitzyAgent:
         if keep_cart and key in self._sessions:
             existing_cart = self._sessions[key].cart
             state.cart = existing_cart
-        self._sessions[key] = state
+        self.save_state(state)
         return state
 
     async def process_message(
@@ -106,104 +134,106 @@ class FitzyAgent:
             resolved_message = message or kwargs.get("message", "")
             state_obj = self.get_state(resolved_session_id)
 
-        # Language Resolution Rule:
-        if language:
-            state_obj.set_language(language)
-        else:
-            det_language = classify_language(resolved_message, state_obj.language)
-            state_obj.set_language(det_language)
-        
-        extraction = await self._extract_intent(resolved_message)
+        lock = self._get_session_lock(resolved_session_id)
+        async with lock:
+            # Language Resolution Rule:
+            if language:
+                state_obj.set_language(language)
+            else:
+                det_language = classify_language(resolved_message, state_obj.language)
+                state_obj.set_language(det_language)
 
-        extracted_intents_summary = [
-            f"{i.value if hasattr(i, 'value') else str(i)}"
-            for i in getattr(extraction, "intents", [])
-        ]
-        
-        trace = CURRENT_TURN_TRACE.get()
-        if trace:
-            trace.intent(extracted_intents_summary)
-        else:
-            logger.info(
-                "[--- INTENT EXTRACTED ---] session=%s | language=%s | intents=%s",
-                resolved_session_id,
-                state_obj.language.value if state_obj.language else "unknown",
-                extracted_intents_summary,
+            extraction = await self._extract_intent(resolved_message)
+
+            extracted_intents_summary = [
+                f"{i.value if hasattr(i, 'value') else str(i)}"
+                for i in getattr(extraction, "intents", [])
+            ]
+
+            trace = CURRENT_TURN_TRACE.get()
+            if trace:
+                trace.intent(extracted_intents_summary)
+            else:
+                logger.info(
+                    "[--- INTENT EXTRACTED ---] session=%s | language=%s | intents=%s",
+                    resolved_session_id,
+                    state_obj.language.value if state_obj.language else "unknown",
+                    extracted_intents_summary,
+                )
+
+            waiting_actions = [action.model_copy(deep=True) for action in state_obj.action_plan.actions if action.status == ActionStatus.WAITING_FOR_INPUT]
+            self._apply_intent_to_state(extraction, state_obj, message=resolved_message)
+            self._reopen_waiting_actions_for_new_input(state_obj)
+            plan = self._planner.build_plan(extraction, state_obj)
+            self._merge_waiting_actions(plan, waiting_actions)
+            state_obj.action_plan = plan
+
+            actions_summary = [
+                f"{a.action_id}:{a.tool_name.value}(params={a.parameters}, missing={a.missing_parameters}, status={a.status.value})"
+                for a in plan.actions
+            ]
+            if trace:
+                trace.event(
+                    "PLAN & STATE",
+                    plan_id=plan.plan_id[:8] if hasattr(plan, "plan_id") and plan.plan_id else None,
+                    active_search=state_obj.current_search.model_dump(exclude_none=True),
+                    delivery=state_obj.delivery.model_dump(exclude_none=True),
+                    cart_items=state_obj.cart.item_count,
+                    actions=actions_summary,
+                )
+            else:
+                logger.info(
+                    "[--- PLAN & STATE ---] session=%s | plan_id=%s | active_search=%s | delivery=%s | cart_items=%d | actions=%s",
+                    resolved_session_id,
+                    plan.plan_id,
+                    state_obj.current_search.model_dump(exclude_none=True),
+                    state_obj.delivery.model_dump(exclude_none=True),
+                    state_obj.cart.item_count,
+                    actions_summary,
+                )
+
+            self._resolve_known_parameters(state_obj)
+            await self._execute_until_waiting(state_obj, user_message=resolved_message)
+            executed_tools = [a.tool_name.value for a in state_obj.action_plan.actions if a.status == ActionStatus.COMPLETED]
+
+            runtime_context = self._build_runtime_context(state_obj, user_message=resolved_message)
+            reply = await self._responses.generate(
+                language=state_obj.language or LanguageMode.ENGLISH,
+                user_message=resolved_message,
+                runtime_context=runtime_context,
             )
 
-        waiting_actions = [action.model_copy(deep=True) for action in state_obj.action_plan.actions if action.status == ActionStatus.WAITING_FOR_INPUT]
-        self._apply_intent_to_state(extraction, state_obj, message=resolved_message)
-        self._reopen_waiting_actions_for_new_input(state_obj)
-        plan = self._planner.build_plan(extraction, state_obj)
-        self._merge_waiting_actions(plan, waiting_actions)
-        state_obj.action_plan = plan
-        
-        actions_summary = [
-            f"{a.action_id}:{a.tool_name.value}(params={a.parameters}, missing={a.missing_parameters}, status={a.status.value})"
-            for a in plan.actions
-        ]
-        if trace:
-            trace.event(
-                "PLAN & STATE",
-                plan_id=plan.plan_id[:8] if hasattr(plan, "plan_id") and plan.plan_id else None,
-                active_search=state_obj.current_search.model_dump(exclude_none=True),
-                delivery=state_obj.delivery.model_dump(exclude_none=True),
-                cart_items=state_obj.cart.item_count,
-                actions=actions_summary,
+            lang_str = state_obj.language.value if state_obj.language else "english"
+
+            self.save_state(state_obj)
+
+            if ToolName.PLACE_ORDER.value in executed_tools:
+                order_res = state_obj.last_tool_results[ToolName.PLACE_ORDER.value]
+                return build_order_response(session_id=resolved_session_id, language=lang_str, reply=reply, result=order_res)
+
+            if ToolName.PREVIEW_CHECKOUT.value in executed_tools:
+                checkout_res = state_obj.last_tool_results[ToolName.PREVIEW_CHECKOUT.value]
+                return build_checkout_response(session_id=resolved_session_id, language=lang_str, reply=reply, result=checkout_res)
+
+            if any(k in executed_tools for k in (ToolName.ADD_TO_CART.value, ToolName.UPDATE_CART.value, ToolName.REMOVE_FROM_CART.value, ToolName.CLEAR_CART.value, ToolName.GET_CART.value)):
+                cart_tool = next(k for k in (ToolName.ADD_TO_CART.value, ToolName.UPDATE_CART.value, ToolName.REMOVE_FROM_CART.value, ToolName.CLEAR_CART.value, ToolName.GET_CART.value) if k in executed_tools)
+                cart_res = state_obj.last_tool_results[cart_tool]
+                return build_cart_response(session_id=resolved_session_id, language=lang_str, reply=reply, result=cart_res)
+
+            if ToolName.GET_PRODUCT_DETAILS.value in executed_tools:
+                detail_res = state_obj.last_tool_results[ToolName.GET_PRODUCT_DETAILS.value]
+                return build_product_details_response(session_id=resolved_session_id, language=lang_str, reply=reply, result=detail_res)
+
+            if ToolName.GET_PRODUCTS.value in executed_tools and not self._is_broad_category_search(state_obj.current_search, user_message=resolved_message):
+                search_res = state_obj.last_tool_results[ToolName.GET_PRODUCTS.value]
+                return build_product_list_response(session_id=resolved_session_id, language=lang_str, reply=reply, result=search_res, context=context)
+
+            return AgentTurnResponse(
+                session_id=resolved_session_id,
+                reply=reply,
+                language=lang_str,
+                content_type=ContentType.GENERAL,
             )
-        else:
-            logger.info(
-                "[--- PLAN & STATE ---] session=%s | plan_id=%s | active_search=%s | delivery=%s | cart_items=%d | actions=%s",
-                resolved_session_id,
-                plan.plan_id,
-                state_obj.current_search.model_dump(exclude_none=True),
-                state_obj.delivery.model_dump(exclude_none=True),
-                state_obj.cart.item_count,
-                actions_summary,
-            )
-
-        self._resolve_known_parameters(state_obj)
-        await self._execute_until_waiting(state_obj, user_message=resolved_message)
-
-        runtime_context = self._build_runtime_context(state_obj, user_message=resolved_message)
-        reply = await self._responses.generate(
-            language=state_obj.language or LanguageMode.ENGLISH,
-            user_message=resolved_message,
-            runtime_context=runtime_context,
-        )
-
-        lang_str = state_obj.language.value if state_obj.language else "english"
-
-        # Construct authoritative AgentTurnResponse envelope based on current turn action priority
-        executed_tools = [a.tool_name.value for a in state_obj.action_plan.actions if a.status == ActionStatus.COMPLETED]
-
-        if ToolName.PLACE_ORDER.value in executed_tools:
-            order_res = state_obj.last_tool_results[ToolName.PLACE_ORDER.value]
-            return build_order_response(session_id=resolved_session_id, language=lang_str, reply=reply, result=order_res)
-
-        if ToolName.PREVIEW_CHECKOUT.value in executed_tools:
-            checkout_res = state_obj.last_tool_results[ToolName.PREVIEW_CHECKOUT.value]
-            return build_checkout_response(session_id=resolved_session_id, language=lang_str, reply=reply, result=checkout_res)
-
-        if any(k in executed_tools for k in (ToolName.ADD_TO_CART.value, ToolName.UPDATE_CART.value, ToolName.REMOVE_FROM_CART.value, ToolName.CLEAR_CART.value, ToolName.GET_CART.value)):
-            cart_tool = next(k for k in (ToolName.ADD_TO_CART.value, ToolName.UPDATE_CART.value, ToolName.REMOVE_FROM_CART.value, ToolName.CLEAR_CART.value, ToolName.GET_CART.value) if k in executed_tools)
-            cart_res = state_obj.last_tool_results[cart_tool]
-            return build_cart_response(session_id=resolved_session_id, language=lang_str, reply=reply, result=cart_res)
-
-        if ToolName.GET_PRODUCT_DETAILS.value in executed_tools:
-            detail_res = state_obj.last_tool_results[ToolName.GET_PRODUCT_DETAILS.value]
-            return build_product_details_response(session_id=resolved_session_id, language=lang_str, reply=reply, result=detail_res)
-
-        if ToolName.GET_PRODUCTS.value in executed_tools and not self._is_broad_category_search(state_obj.current_search, user_message=resolved_message):
-            search_res = state_obj.last_tool_results[ToolName.GET_PRODUCTS.value]
-            return build_product_list_response(session_id=resolved_session_id, language=lang_str, reply=reply, result=search_res, context=context)
-
-        return AgentTurnResponse(
-            session_id=resolved_session_id,
-            reply=reply,
-            language=lang_str,
-            content_type=ContentType.GENERAL,
-        )
 
     async def _extract_intent(self, message: str) -> StructuredIntent:
         """Use the LLM for semantic intent extraction with heuristic fallback."""
@@ -486,59 +516,51 @@ class FitzyAgent:
                 or params.get("index")
                 or params.get("reference")
             )
-            idx = 1
-            if isinstance(reference, ProductReference):
-                idx = reference.index or 1
-            elif isinstance(reference, int):
-                idx = reference
-            elif isinstance(reference, str) and reference.isdigit():
-                idx = int(reference)
-            
-            if product_id is None and state.displayed_products:
-                if 1 <= idx <= len(state.displayed_products):
-                    product_id = state.displayed_products[idx - 1].product_id
-                else:
-                    product_id = state.displayed_products[0].product_id
-            if product_id is None and state.selected_product_id:
+            if product_id is None and reference is not None and state.displayed_products:
+                product_id = self._resolve_displayed_product_id(state, reference)
+            elif product_id is None and state.selected_product_id and reference is None:
                 product_id = state.selected_product_id
+
             if product_id is not None:
                 params["product_id"] = int(product_id)
                 state.remember_selected_product(int(product_id))
+            else:
+                params.pop("product_id", None)
 
         if action.tool_name == ToolName.ADD_TO_CART:
-            reference = params.get("product_reference") or params.get("display_index") or params.get("index") or 1
-            if isinstance(reference, ProductReference):
-                ref_val = reference.index or reference.text_reference or 1
-            else:
-                ref_val = reference
+            reference = params.get("product_reference") or params.get("display_index") or params.get("index")
 
-            # Prioritize GET_PRODUCT_DETAILS if available to get precise variant_id & branch_id
+            # Prioritize GET_PRODUCT_DETAILS if available to get precise variant_id & branch_id (ignoring stale details)
             if ToolName.GET_PRODUCT_DETAILS.value in state.last_tool_results:
                 det = state.last_tool_results[ToolName.GET_PRODUCT_DETAILS.value]
-                opts = getattr(det, "options", None) or (det.get("options") if isinstance(det, dict) else []) or getattr(det, "variants", None) or (det.get("variants") if isinstance(det, dict) else [])
-                abundant_opts = []
-                in_stock_opts = []
-                for opt in opts:
-                    qty = getattr(opt, "available_quantity", 0) if not isinstance(opt, dict) else opt.get("available_quantity", 0)
-                    avail = getattr(opt, "is_available", True) if not isinstance(opt, dict) else opt.get("is_available", True)
-                    if avail and qty >= 2:
-                        abundant_opts.append(opt)
-                    elif avail and qty > 0:
-                        in_stock_opts.append(opt)
-                target_opts = abundant_opts if abundant_opts else (in_stock_opts if in_stock_opts else opts)
-                for opt in target_opts:
-                    vid = getattr(opt, "variant_id", None) or (opt.get("variant_id") if isinstance(opt, dict) else None)
-                    bid = getattr(opt, "branch_id", None) or (opt.get("branch_id") if isinstance(opt, dict) else None)
-                    pid = getattr(opt, "product_id", None) or (opt.get("product_id") if isinstance(opt, dict) else None)
-                    if vid and bid:
-                        params["variant_id"] = vid
-                        params["branch_id"] = bid
-                        if pid:
-                            params["selected_product_id"] = pid
-                        break
+                det_pid = getattr(det, "product_id", None) or (det.get("product_id") if isinstance(det, dict) else None)
+                if det_pid and state.selected_product_id and int(det_pid) != int(state.selected_product_id):
+                    det = None  # Stale details! Ignore!
+                if det:
+                    opts = getattr(det, "options", None) or (det.get("options") if isinstance(det, dict) else []) or getattr(det, "variants", None) or (det.get("variants") if isinstance(det, dict) else [])
+                    abundant_opts = []
+                    in_stock_opts = []
+                    for opt in opts:
+                        qty = getattr(opt, "available_quantity", 0) if not isinstance(opt, dict) else opt.get("available_quantity", 0)
+                        avail = getattr(opt, "is_available", True) if not isinstance(opt, dict) else opt.get("is_available", True)
+                        if avail and qty >= 2:
+                            abundant_opts.append(opt)
+                        elif avail and qty > 0:
+                            in_stock_opts.append(opt)
+                    target_opts = abundant_opts if abundant_opts else (in_stock_opts if in_stock_opts else opts)
+                    for opt in target_opts:
+                        vid = getattr(opt, "variant_id", None) or (opt.get("variant_id") if isinstance(opt, dict) else None)
+                        bid = getattr(opt, "branch_id", None) or (opt.get("branch_id") if isinstance(opt, dict) else None)
+                        pid = getattr(opt, "product_id", None) or (opt.get("product_id") if isinstance(opt, dict) else None)
+                        if vid and bid:
+                            params["variant_id"] = vid
+                            params["branch_id"] = bid
+                            if pid:
+                                params["selected_product_id"] = pid
+                            break
 
-            if params.get("variant_id") is None:
-                option = self._resolve_variant_from_latest_search(state, ref_val, params)
+            if params.get("variant_id") is None and reference is not None:
+                option = self._resolve_variant_from_latest_search(state, reference, params)
                 if option is not None:
                     vid = getattr(option, "variant_id", None) or (option.get("variant_id") if isinstance(option, dict) else None)
                     bid = getattr(option, "branch_id", None) or (option.get("branch_id") if isinstance(option, dict) else None)
@@ -549,9 +571,6 @@ class FitzyAgent:
                         params["branch_id"] = bid
                     if pid:
                         params["selected_product_id"] = pid
-
-            if not params.get("branch_id") or int(params.get("branch_id", 0)) <= 0:
-                params["branch_id"] = 55
 
             params.setdefault("quantity", 1)
 
@@ -568,16 +587,18 @@ class FitzyAgent:
                 if isinstance(cart_res, dict):
                     items = cart_res.get("items", [])
                 elif hasattr(cart_res, "items"):
-                    items = getattr(cart_res, "items", [])
+                    items = cart_res.items or []
                 if items:
-                    idx = 0
-                    ref = params.get("product_reference") or params.get("item_reference") or 1
-                    if isinstance(ref, int) and 1 <= ref <= len(items):
-                        idx = ref - 1
-                    item = items[idx]
-                    iid = item.get("item_id") if isinstance(item, dict) else getattr(item, "item_id", None)
-                    if iid:
-                        params["item_id"] = str(iid)
+                    item_ref = params.get("cart_item_reference") or params.get("item_index") or 1
+                    try:
+                        idx = int(item_ref) - 1
+                    except (TypeError, ValueError):
+                        idx = 0
+                    if 0 <= idx < len(items):
+                        target_item = items[idx]
+                        iid = getattr(target_item, "item_id", None) or (target_item.get("item_id") if isinstance(target_item, dict) else None)
+                        if iid:
+                            params["item_id"] = str(iid)
 
             if action.tool_name == ToolName.UPDATE_CART and not params.get("quantity"):
                 qty = params.get("target_quantity") or params.get("new_quantity") or 2
@@ -623,22 +644,24 @@ class FitzyAgent:
 
     @staticmethod
     def _resolve_displayed_product_id(state: ConversationState, reference: Any) -> int | None:
-        """Resolve '1', '2', 'first', etc. against the latest displayed product set."""
+        """Resolve '1', '2', 'first', etc. strictly against the displayed product set."""
+
+        if isinstance(reference, ProductReference):
+            reference = reference.index or reference.text_reference
 
         if isinstance(reference, str):
             ref_str = reference.lower().strip()
-            word_map = {"first": 1, "1st": 1, "second": 2, "2nd": 2, "third": 3, "3rd": 3}
+            word_map = {"first": 1, "1st": 1, "second": 2, "2nd": 2, "third": 3, "3rd": 3, "fourth": 4, "4th": 4}
             if ref_str in word_map:
                 reference = word_map[ref_str]
         try:
             index = int(reference)
         except (TypeError, ValueError):
-            index = 1
+            return None
+
         match = next((item for item in state.displayed_products if item.index == index), None)
         if match:
             return match.product_id
-        if state.displayed_products:
-            return state.displayed_products[0].product_id
         return None
 
     def _resolve_variant_from_latest_search(self, state: ConversationState, reference: Any, params: dict[str, Any]) -> Any | None:

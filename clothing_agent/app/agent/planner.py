@@ -143,6 +143,15 @@ class ActionPlanner:
                     has_checkout = True
                     dependencies.append(checkout.action_id)
 
+            if tool_name in {
+                ToolName.CREATE_CART,
+                ToolName.ADD_TO_CART,
+                ToolName.UPDATE_CART,
+                ToolName.REMOVE_FROM_CART,
+                ToolName.CLEAR_CART,
+            } and last_cart_write_id and last_cart_write_id not in dependencies:
+                dependencies.append(last_cart_write_id)
+
             if definition.confirmation_required:
                 params.setdefault("explicit_confirmation", self._get_explicit_confirmation(extraction))
 

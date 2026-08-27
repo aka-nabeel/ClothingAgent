@@ -42,7 +42,11 @@ class AppContainer:
             model=config.llm_model,
             timeout_seconds=config.llm_timeout_seconds,
         )
-        self.fitzy_agent = FitzyAgent(llm=self.llm, tools=self.tool_adapter)
+        from .state_store import FileConversationStateStore
+        from pathlib import Path
+        state_dir = Path(getattr(config, "state_store_dir", "data/sessions"))
+        self.state_store = FileConversationStateStore(state_dir)
+        self.fitzy_agent = FitzyAgent(llm=self.llm, tools=self.tool_adapter, config=config, state_store=self.state_store)
 
     async def close(self) -> None:
         """Release shared HTTP connections during shutdown."""

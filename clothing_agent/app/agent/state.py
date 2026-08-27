@@ -183,6 +183,7 @@ class ConversationState(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     session_id: UUID = Field(default_factory=uuid4)
+    customer_id: str | None = None
     language: LanguageMode | None = None
     preferences: CustomerPreferences = Field(default_factory=CustomerPreferences)
     current_search: SearchContext = Field(default_factory=SearchContext)
